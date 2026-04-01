@@ -1,0 +1,23 @@
+{
+  "display": {
+    "icon": {
+      "id": "verseworks:hyper_dust"
+    },
+    "title": {
+      "translate": "advancements.verseworks.root.title"
+    },
+    "description": {
+      "translate": "advancements.verseworks.root.description"
+    },
+    "background": "minecraft:block/obsidian",
+    "frame": "task",
+    "show_toast": false,
+    "announce_to_chat": false,
+    "hidden": false
+  },
+  "criteria": {
+    "unlocked": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

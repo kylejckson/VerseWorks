@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "HDH",
+    "HCH",
+    "HHH"
+  ],
+  "key": {
+    "H": {
+      "item": "verseworks:hyper_dust"
+    },
+    "D": {
+      "item": "minecraft:diamond"
+    },
+    "C": {
+      "item": "minecraft:compass"
+    }
+  },
+  "result": {
+    "id": "verseworks:dimensional_analyzer",
+    "count": 1
+  }
+}

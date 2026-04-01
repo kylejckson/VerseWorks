@@ -1,0 +1,28 @@
+{
+  "parent": "verseworks:new_worlds_await",
+  "display": {
+    "icon": {
+      "id": "verseworks:warp"
+    },
+    "title": {
+      "translate": "advancements.verseworks.enter_a_new_world.title"
+    },
+    "description": {
+      "translate": "advancements.verseworks.enter_a_new_world.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "entered_world": {
+      "trigger": "minecraft:impossible"
+    }
+  },
+  "requirements": [
+    [
+      "entered_world"
+    ]
+  ]
+}

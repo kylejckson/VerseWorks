@@ -1,0 +1,114 @@
+{
+  "variants": {
+    "facing=down,variant=0": [
+      { "model": "verseworks:block/mystic_crystal", "x": 180 },
+      { "model": "verseworks:block/mystic_crystal_twist_1", "x": 180 },
+      { "model": "verseworks:block/mystic_crystal_twist_2", "x": 180 },
+      { "model": "verseworks:block/mystic_crystal_twist_3", "x": 180 }
+    ],
+    "facing=up,variant=0": [
+      { "model": "verseworks:block/mystic_crystal" },
+      { "model": "verseworks:block/mystic_crystal_twist_1" },
+      { "model": "verseworks:block/mystic_crystal_twist_2" },
+      { "model": "verseworks:block/mystic_crystal_twist_3" }
+    ],
+    "facing=north,variant=0": [
+      { "model": "verseworks:block/mystic_crystal", "x": 90 },
+      { "model": "verseworks:block/mystic_crystal_twist_1", "x": 90 },
+      { "model": "verseworks:block/mystic_crystal_twist_2", "x": 90 },
+      { "model": "verseworks:block/mystic_crystal_twist_3", "x": 90 }
+    ],
+    "facing=south,variant=0": [
+      { "model": "verseworks:block/mystic_crystal", "x": 90, "y": 180 },
+      { "model": "verseworks:block/mystic_crystal_twist_1", "x": 90, "y": 180 },
+      { "model": "verseworks:block/mystic_crystal_twist_2", "x": 90, "y": 180 },
+      { "model": "verseworks:block/mystic_crystal_twist_3", "x": 90, "y": 180 }
+    ],
+    "facing=west,variant=0": [
+      { "model": "verseworks:block/mystic_crystal", "x": 90, "y": 270 },
+      { "model": "verseworks:block/mystic_crystal_twist_1", "x": 90, "y": 270 },
+      { "model": "verseworks:block/mystic_crystal_twist_2", "x": 90, "y": 270 },
+      { "model": "verseworks:block/mystic_crystal_twist_3", "x": 90, "y": 270 }
+    ],
+    "facing=east,variant=0": [
+      { "model": "verseworks:block/mystic_crystal", "x": 90, "y": 90 },
+      { "model": "verseworks:block/mystic_crystal_twist_1", "x": 90, "y": 90 },
+      { "model": "verseworks:block/mystic_crystal_twist_2", "x": 90, "y": 90 },
+      { "model": "verseworks:block/mystic_crystal_twist_3", "x": 90, "y": 90 }
+    ],
+
+    "facing=down,variant=1": [
+      { "model": "verseworks:block/mystic_crystal_1", "x": 180 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_1", "x": 180 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_2", "x": 180 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_3", "x": 180 }
+    ],
+    "facing=up,variant=1": [
+      { "model": "verseworks:block/mystic_crystal_1" },
+      { "model": "verseworks:block/mystic_crystal_1_twist_1" },
+      { "model": "verseworks:block/mystic_crystal_1_twist_2" },
+      { "model": "verseworks:block/mystic_crystal_1_twist_3" }
+    ],
+    "facing=north,variant=1": [
+      { "model": "verseworks:block/mystic_crystal_1", "x": 90 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_1", "x": 90 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_2", "x": 90 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_3", "x": 90 }
+    ],
+    "facing=south,variant=1": [
+      { "model": "verseworks:block/mystic_crystal_1", "x": 90, "y": 180 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_1", "x": 90, "y": 180 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_2", "x": 90, "y": 180 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_3", "x": 90, "y": 180 }
+    ],
+    "facing=west,variant=1": [
+      { "model": "verseworks:block/mystic_crystal_1", "x": 90, "y": 270 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_1", "x": 90, "y": 270 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_2", "x": 90, "y": 270 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_3", "x": 90, "y": 270 }
+    ],
+    "facing=east,variant=1": [
+      { "model": "verseworks:block/mystic_crystal_1", "x": 90, "y": 90 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_1", "x": 90, "y": 90 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_2", "x": 90, "y": 90 },
+      { "model": "verseworks:block/mystic_crystal_1_twist_3", "x": 90, "y": 90 }
+    ],
+
+    "facing=down,variant=2": [
+      { "model": "verseworks:block/mystic_crystal_2", "x": 180 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_1", "x": 180 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_2", "x": 180 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_3", "x": 180 }
+    ],
+    "facing=up,variant=2": [
+      { "model": "verseworks:block/mystic_crystal_2" },
+      { "model": "verseworks:block/mystic_crystal_2_twist_1" },
+      { "model": "verseworks:block/mystic_crystal_2_twist_2" },
+      { "model": "verseworks:block/mystic_crystal_2_twist_3" }
+    ],
+    "facing=north,variant=2": [
+      { "model": "verseworks:block/mystic_crystal_2", "x": 90 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_1", "x": 90 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_2", "x": 90 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_3", "x": 90 }
+    ],
+    "facing=south,variant=2": [
+      { "model": "verseworks:block/mystic_crystal_2", "x": 90, "y": 180 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_1", "x": 90, "y": 180 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_2", "x": 90, "y": 180 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_3", "x": 90, "y": 180 }
+    ],
+    "facing=west,variant=2": [
+      { "model": "verseworks:block/mystic_crystal_2", "x": 90, "y": 270 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_1", "x": 90, "y": 270 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_2", "x": 90, "y": 270 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_3", "x": 90, "y": 270 }
+    ],
+    "facing=east,variant=2": [
+      { "model": "verseworks:block/mystic_crystal_2", "x": 90, "y": 90 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_1", "x": 90, "y": 90 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_2", "x": 90, "y": 90 },
+      { "model": "verseworks:block/mystic_crystal_2_twist_3", "x": 90, "y": 90 }
+    ]
+  }
+}

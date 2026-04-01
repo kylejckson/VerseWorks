@@ -1,0 +1,37 @@
+{
+  "parent": "verseworks:root",
+  "display": {
+    "icon": {
+      "id": "verseworks:hyper_dust"
+    },
+    "title": {
+      "translate": "advancements.verseworks.mystical_travel.title"
+    },
+    "description": {
+      "translate": "advancements.verseworks.mystical_travel.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "has_hyper_dust": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "verseworks:hyper_dust"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "requirements": [
+    [
+      "has_hyper_dust"
+    ]
+  ]
+}

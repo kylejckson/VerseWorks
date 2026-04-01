@@ -1,0 +1,28 @@
+{
+  "parent": "verseworks:mystical_travel",
+  "display": {
+    "icon": {
+      "id": "verseworks:hyper_book"
+    },
+    "title": {
+      "translate": "advancements.verseworks.new_worlds_await.title"
+    },
+    "description": {
+      "translate": "advancements.verseworks.new_worlds_await.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "crafted_hyperbook": {
+      "trigger": "minecraft:impossible"
+    }
+  },
+  "requirements": [
+    [
+      "crafted_hyperbook"
+    ]
+  ]
+}

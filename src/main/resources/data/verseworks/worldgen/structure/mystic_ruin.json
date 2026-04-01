@@ -1,0 +1,7 @@
+{
+  "type": "verseworks:mystic_ruin",
+  "biomes": "#verseworks:has_mystic_ruin",
+  "spawn_overrides": {},
+  "step": "surface_structures",
+  "terrain_adaptation": "none"
+}

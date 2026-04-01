@@ -1,0 +1,108 @@
+{
+  "enter_dimension": {
+    "sounds": [
+      {
+        "name": "verseworks:enter_dimension",
+        "stream": false
+      }
+    ]
+  },
+  "entered_dimension": {
+    "sounds": [
+      {
+        "name": "verseworks:entered_dimension",
+        "stream": false
+      }
+    ]
+  },
+  "bubbling_cauldron": {
+    "sounds": [
+      {
+        "name": "verseworks:bubbling_cauldron",
+        "stream": false,
+        "preload": true,
+        "attenuation_distance": 32,
+        "volume": 1.3
+      }
+    ]
+  },
+  "dimension_prepared": {
+    "sounds": [
+      {
+        "name": "verseworks:dimension_prepared",
+        "stream": false,
+        "preload": true,
+        "attenuation_distance": 24
+      }
+    ]
+  },
+  "dimensional_analyzer": {
+    "sounds": [
+      {
+        "name": "verseworks:dimensional_analyzer",
+        "stream": false
+      }
+    ]
+  },
+  "magic_1": {
+    "sounds": [
+      {
+        "name": "verseworks:magic_1",
+        "stream": false
+      }
+    ]
+  },
+  "magic_2": {
+    "sounds": [
+      {
+        "name": "verseworks:magic_2",
+        "stream": false
+      }
+    ]
+  },
+  "warp_1": {
+    "sounds": [
+      {
+        "name": "verseworks:warp_1",
+        "stream": false
+      }
+    ]
+  },
+  "warp_2": {
+    "sounds": [
+      {
+        "name": "verseworks:warp_2",
+        "stream": false
+      }
+    ]
+  },
+  "meteor_enter": {
+    "sounds": [
+      {
+        "name": "verseworks:meteor_enter",
+        "stream": false,
+        "preload": true,
+        "attenuation_distance": 256,
+        "volume": 2.5
+      }
+    ]
+  },
+  "meteor_impact": {
+    "sounds": [
+      {
+        "name": "verseworks:meteor_impact",
+        "stream": false,
+        "preload": true,
+        "attenuation_distance": 48
+      }
+    ]
+  },
+  "ritual_complete": {
+    "sounds": [
+      {
+        "name": "verseworks:ritual_complete",
+        "stream": false
+      }
+    ]
+  }
+}

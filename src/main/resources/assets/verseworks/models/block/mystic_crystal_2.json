@@ -1,0 +1,12 @@
+{
+  "loader": "neoforge:obj",
+  "ambientocclusion": false,
+  "automatic_culling": false,
+  "shade_quads": false,
+  "flip_v": true,
+  "model": "verseworks:models/block/obj_crystal_2.obj",
+  "render_type": "minecraft:translucent",
+  "textures": {
+    "particle": "verseworks:block/mystic_crystal"
+  }
+}

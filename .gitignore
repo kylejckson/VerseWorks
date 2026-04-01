@@ -1,0 +1,48 @@
+# IDE and workspace state
+.idea/
+.vscode/
+.eclipse/
+.settings/
+.metadata/
+.classpath
+.project
+*.ipr
+*.iws
+*.iml
+*.launch
+*.code-workspace
+VerseWorks.code-workspace
+
+# Python helper environment
+.venv/
+__pycache__/
+*.pyc
+
+# Gradle and build output
+.gradle/
+.gradle-user-home/
+build/
+bin/
+out/
+repo/
+
+# Runtime data and local test worlds
+run/
+run-data/
+logs/
+crash-reports/
+hs_err_pid*.log
+
+# Local notes and private docs
+AGENTS.md
+FOLLOW_UP.md
+docs/private/
+
+# Misc local files
+*.bak
+*.tmp
+*.orig
+
+# Files from Forge MDK
+forge_README.txt
+forge*changelog.txt
