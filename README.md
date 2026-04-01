@@ -25,7 +25,6 @@ After setup, the main run targets are the VS Code launch entries already include
 - `src/main/java` contains the mod code.
 - `src/main/resources` contains runtime assets and data.
 - `src/generated/resources` contains generated assets and data.
-- `docs/private` is for local notes and private workspace material.
 
 ## License
 
