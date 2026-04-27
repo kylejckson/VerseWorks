@@ -1,6 +1,5 @@
 package com.kyden.verseworks.item;
 
-import com.kyden.verseworks.ritual.HyperBookRitualHooks;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
@@ -43,7 +42,7 @@ public final class HyperBookItem extends WrittenBookItem {
                     + Math.round(data.targetXRot())).withStyle(ChatFormatting.DARK_GRAY));
             });
         });
-        tooltip.add(Component.literal("Right-click or use on a lectern.").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.literal("Place on a lectern to travel.").withStyle(ChatFormatting.GRAY));
     }
 
     @Override
@@ -55,7 +54,7 @@ public final class HyperBookItem extends WrittenBookItem {
         }
 
         if (player instanceof ServerPlayer serverPlayer) {
-            HyperBookRitualHooks.useHeldHyperBook(serverPlayer, stack, data);
+            serverPlayer.sendSystemMessage(Component.literal("Place this Hyperbook on a lectern to use it.").withStyle(ChatFormatting.YELLOW));
         }
 
         return InteractionResultHolder.sidedSuccess(stack, level.isClientSide());

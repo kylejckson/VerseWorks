@@ -121,7 +121,7 @@ public final class MysticCrystalBlock extends DirectionalBlock {
 
         int verseCount = VerseCatalog.randomCrystalVerseDropCount(random);
         for (int index = 0; index < verseCount; index++) {
-            Block.popResource(level, pos, VerseCatalog.createRandomDropVerse(VerseItems.VERSE.get(), level.registryAccess(), random));
+            Block.popResource(level, pos, VerseCatalog.createRandomDropReward(VerseItems.VERSE.get(), VerseItems.BLANK_VERSE.get(), level.registryAccess(), random));
         }
     }
 }

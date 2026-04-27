@@ -8,19 +8,13 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.chunk.status.ChunkStatus;
 
-import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 final class VerseChunkWarmup {
-    private static final int CHUNK_REQUESTS_PER_TICK = 2;
     private static final Map<ResourceKey<Level>, Set<WarmupTicket>> ACTIVE_TICKETS = new ConcurrentHashMap<>();
     private static final Map<ResourceKey<Level>, Map<WarmupTicket, WarmupRequest>> ACTIVE_REQUESTS = new ConcurrentHashMap<>();
 
@@ -28,6 +22,14 @@ final class VerseChunkWarmup {
     }
 
     static CompletableFuture<Void> request(ServerLevel level, ChunkPos centerChunk, int radius) {
+        return request(level, centerChunk, radius, WarmupMode.ENTITY_TICKING);
+    }
+
+    static CompletableFuture<Void> requestLoaded(ServerLevel level, ChunkPos centerChunk, int radius) {
+        return request(level, centerChunk, radius, WarmupMode.LOADED);
+    }
+
+    private static CompletableFuture<Void> request(ServerLevel level, ChunkPos centerChunk, int radius, WarmupMode mode) {
         MinecraftServer server = level.getServer();
         CompletableFuture<Void> result = new CompletableFuture<>();
         if (VerseDimensionRuntimeHooks.isShutdownInProgress(server)) {
@@ -38,15 +40,15 @@ final class VerseChunkWarmup {
         Runnable scheduleWarmup = () -> {
             WarmupTicket ticket = new WarmupTicket(centerChunk, radius);
             Map<WarmupTicket, WarmupRequest> requests = ACTIVE_REQUESTS.computeIfAbsent(level.dimension(), ignored -> new ConcurrentHashMap<>());
-            WarmupRequest request = requests.computeIfAbsent(ticket, ignored -> {
-                try {
-                    if (ACTIVE_TICKETS.computeIfAbsent(level.dimension(), ignoredKey -> ConcurrentHashMap.newKeySet()).add(ticket)) {
-                        invokeChunkTicket(level.getChunkSource(), "addRegionTicket", centerChunk, radius);
-                    }
-                } catch (ReflectiveOperationException exception) {
-                    VerseWorks.LOGGER.debug("VerseWorks could not add warmup ticket for {}", level.dimension().location(), exception);
+            WarmupRequest request = requests.compute(ticket, (ignored, existing) -> {
+                if (ACTIVE_TICKETS.computeIfAbsent(level.dimension(), ignoredKey -> ConcurrentHashMap.newKeySet()).add(ticket)) {
+                    level.getChunkSource().addRegionTicket(TicketType.PLAYER, centerChunk, radius, centerChunk, true);
                 }
-                return new WarmupRequest(centerChunk, radius);
+                if (existing == null) {
+                    return new WarmupRequest(centerChunk, radius, mode);
+                }
+                existing.requireAtLeast(mode);
+                return existing;
             });
             request.result().whenComplete((ignored, throwable) -> {
                 if (throwable != null) {
@@ -82,17 +84,16 @@ final class VerseChunkWarmup {
         }
         Map<WarmupTicket, WarmupRequest> requests = ACTIVE_REQUESTS.get(level.dimension());
         if (requests != null) {
-            requests.remove(ticket);
+            WarmupRequest request = requests.remove(ticket);
+            if (request != null) {
+                request.result().complete(null);
+            }
             if (requests.isEmpty()) {
                 ACTIVE_REQUESTS.remove(level.dimension(), requests);
             }
         }
 
-        try {
-            invokeChunkTicket(level.getChunkSource(), "removeRegionTicket", centerChunk, radius);
-        } catch (ReflectiveOperationException exception) {
-            VerseWorks.LOGGER.debug("VerseWorks could not remove warmup ticket for {}", level.dimension().location(), exception);
-        }
+        level.getChunkSource().removeRegionTicket(TicketType.PLAYER, centerChunk, radius, centerChunk, true);
     }
 
     static void releaseAll(MinecraftServer server) {
@@ -107,11 +108,12 @@ final class VerseChunkWarmup {
             }
 
             for (WarmupTicket ticket : tickets) {
-                try {
-                    invokeChunkTicket(level.getChunkSource(), "removeRegionTicket", ticket.centerChunk(), ticket.radius());
-                } catch (ReflectiveOperationException exception) {
-                    VerseWorks.LOGGER.debug("VerseWorks could not remove shutdown warmup ticket for {}", level.dimension().location(), exception);
-                }
+                level.getChunkSource().removeRegionTicket(TicketType.PLAYER, ticket.centerChunk(), ticket.radius(), ticket.centerChunk(), true);
+            }
+
+            Map<WarmupTicket, WarmupRequest> requests = ACTIVE_REQUESTS.remove(level.dimension());
+            if (requests != null) {
+                requests.values().forEach(request -> request.result().complete(null));
             }
         }
     }
@@ -127,27 +129,13 @@ final class VerseChunkWarmup {
             return;
         }
 
-        int remainingBudget = CHUNK_REQUESTS_PER_TICK;
-        List<WarmupTicket> completedTickets = new ArrayList<>();
-        List<Map.Entry<WarmupTicket, WarmupRequest>> pendingEntries = new ArrayList<>(requests.entrySet());
-        pendingEntries.sort(Comparator.comparingInt((Map.Entry<WarmupTicket, WarmupRequest> entry) -> entry.getValue().remainingChunkCount()).reversed());
-        for (Map.Entry<WarmupTicket, WarmupRequest> entry : pendingEntries) {
+        requests.entrySet().removeIf(entry -> {
             WarmupRequest request = entry.getValue();
-            if (request.result().isDone()) {
-                completedTickets.add(entry.getKey());
-                continue;
+            if (!request.result().isDone() && request.mode().isSatisfied(level, request.centerChunk(), request.radius())) {
+                request.result().complete(null);
             }
-
-            if (remainingBudget > 0) {
-                remainingBudget -= pumpRequest(level, request, remainingBudget);
-            }
-
-            if (request.result().isDone()) {
-                completedTickets.add(entry.getKey());
-            }
-        }
-
-        completedTickets.forEach(requests::remove);
+            return request.result().isDone();
+        });
         if (requests.isEmpty()) {
             ACTIVE_REQUESTS.remove(level.dimension(), requests);
         }
@@ -168,44 +156,45 @@ final class VerseChunkWarmup {
         }
     }
 
-    private static void invokeChunkTicket(ServerChunkCache chunkSource, String methodName, ChunkPos chunkPos, int radius) throws ReflectiveOperationException {
-        for (Method method : chunkSource.getClass().getMethods()) {
-            if (!method.getName().equals(methodName) || method.getParameterCount() != 4) {
-                continue;
+    private static boolean areChunksEntityTicking(ServerLevel level, ChunkPos centerChunk, int radius) {
+        ServerChunkCache chunkSource = level.getChunkSource();
+        for (int chunkX = centerChunk.x - radius; chunkX <= centerChunk.x + radius; chunkX++) {
+            for (int chunkZ = centerChunk.z - radius; chunkZ <= centerChunk.z + radius; chunkZ++) {
+                if (!chunkSource.isPositionTicking(ChunkPos.asLong(chunkX, chunkZ))) {
+                    return false;
+                }
             }
-
-            method.invoke(chunkSource, TicketType.PLAYER, chunkPos, radius, chunkPos);
-            return;
         }
+        return true;
     }
 
-    private static int pumpRequest(ServerLevel level, WarmupRequest request, int budget) {
-        if (request.result().isDone() || budget <= 0) {
-            return 0;
-        }
-
-        ServerChunkCache chunkSource = level.getChunkSource();
-        int scheduled = 0;
-        while (scheduled < budget && request.hasMoreChunks()) {
-            ChunkPos nextChunk = request.nextChunk();
-            request.futures().add(chunkSource.getChunkFuture(nextChunk.x, nextChunk.z, ChunkStatus.FULL, true));
-            scheduled++;
-        }
-
-        if (!request.hasMoreChunks() && !request.completionRegistered()) {
-            request.markCompletionRegistered();
-            CompletableFuture.allOf(request.futures().toArray(CompletableFuture[]::new))
-                .whenComplete((ignored, throwable) -> {
-                    if (throwable != null) {
-                        request.result().completeExceptionally(throwable);
-                        return;
+    private enum WarmupMode {
+        LOADED {
+            @Override
+            boolean isSatisfied(ServerLevel level, ChunkPos centerChunk, int radius) {
+                ServerChunkCache chunkSource = level.getChunkSource();
+                for (int chunkX = centerChunk.x - radius; chunkX <= centerChunk.x + radius; chunkX++) {
+                    for (int chunkZ = centerChunk.z - radius; chunkZ <= centerChunk.z + radius; chunkZ++) {
+                        if (chunkSource.getChunkNow(chunkX, chunkZ) == null) {
+                            return false;
+                        }
                     }
+                }
+                return true;
+            }
+        },
+        ENTITY_TICKING {
+            @Override
+            boolean isSatisfied(ServerLevel level, ChunkPos centerChunk, int radius) {
+                return areChunksEntityTicking(level, centerChunk, radius);
+            }
+        };
 
-                    request.result().complete(null);
-                });
+        abstract boolean isSatisfied(ServerLevel level, ChunkPos centerChunk, int radius);
+
+        WarmupMode max(WarmupMode other) {
+            return this.ordinal() >= other.ordinal() ? this : other;
         }
-
-        return scheduled;
     }
 
     private record WarmupTicket(ChunkPos centerChunk, int radius) {
@@ -215,53 +204,32 @@ final class VerseChunkWarmup {
         private final ChunkPos centerChunk;
         private final int radius;
         private final CompletableFuture<Void> result = new CompletableFuture<>();
-        private final List<CompletableFuture<?>> futures;
-        private int nextChunkX;
-        private int nextChunkZ;
-        private boolean completionRegistered;
+        private WarmupMode mode;
 
-        private WarmupRequest(ChunkPos centerChunk, int radius) {
+        private WarmupRequest(ChunkPos centerChunk, int radius, WarmupMode mode) {
             this.centerChunk = centerChunk;
             this.radius = radius;
-            this.futures = new ArrayList<>((radius * 2 + 1) * (radius * 2 + 1));
-            this.nextChunkX = centerChunk.x - radius;
-            this.nextChunkZ = centerChunk.z - radius;
-        }
-
-        private boolean hasMoreChunks() {
-            return this.nextChunkX <= this.centerChunk.x + this.radius;
-        }
-
-        private ChunkPos nextChunk() {
-            ChunkPos chunkPos = new ChunkPos(this.nextChunkX, this.nextChunkZ);
-            this.nextChunkZ++;
-            if (this.nextChunkZ > this.centerChunk.z + this.radius) {
-                this.nextChunkZ = this.centerChunk.z - this.radius;
-                this.nextChunkX++;
-            }
-            return chunkPos;
+            this.mode = mode;
         }
 
         private CompletableFuture<Void> result() {
             return this.result;
         }
 
-        private List<CompletableFuture<?>> futures() {
-            return this.futures;
+        private WarmupMode mode() {
+            return this.mode;
         }
 
-        private boolean completionRegistered() {
-            return this.completionRegistered;
+        private void requireAtLeast(WarmupMode mode) {
+            this.mode = this.mode.max(mode);
         }
 
-        private void markCompletionRegistered() {
-            this.completionRegistered = true;
+        private ChunkPos centerChunk() {
+            return this.centerChunk;
         }
 
-        private int remainingChunkCount() {
-            int sideLength = this.radius * 2 + 1;
-            int totalChunks = sideLength * sideLength;
-            return totalChunks - this.futures.size();
+        private int radius() {
+            return this.radius;
         }
     }
 }

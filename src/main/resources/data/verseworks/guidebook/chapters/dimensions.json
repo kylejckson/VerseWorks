@@ -1,0 +1,28 @@
+{
+  "id": "dimensions",
+  "title_key": "guidebook.chapter.dimensions.title",
+  "summary_key": "guidebook.chapter.dimensions.summary",
+  "sort_order": 5,
+  "icon": {
+    "type": "item",
+    "value": "verseworks:mystic_crystal"
+  },
+  "pages": [
+    {
+      "type": "text",
+      "title_key": "guidebook.entry.dimensions_overview.title",
+      "body_keys": [
+        "guidebook.entry.dimensions_overview.body.1",
+        "guidebook.entry.dimensions_overview.body.2"
+      ]
+    },
+    {
+      "type": "image",
+      "title_key": "guidebook.entry.dimensions_showcase.title",
+      "body_keys": [
+        "guidebook.entry.dimensions_showcase.body.1"
+      ],
+      "image": "verseworks:textures/gui/guidebook/images/crystal_realm.png"
+    }
+  ]
+}

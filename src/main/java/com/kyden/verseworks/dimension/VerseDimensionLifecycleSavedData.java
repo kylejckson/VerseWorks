@@ -56,6 +56,12 @@ public final class VerseDimensionLifecycleSavedData extends SavedData {
         setDirty();
     }
 
+    public void forgetDimension(ResourceLocation dimensionId) {
+        if (entries.remove(dimensionId) != null) {
+            setDirty();
+        }
+    }
+
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider provider) {
         tag.putBoolean(INITIALIZED_TAG, initialized);

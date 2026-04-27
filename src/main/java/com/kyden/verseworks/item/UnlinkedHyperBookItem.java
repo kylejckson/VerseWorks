@@ -71,7 +71,7 @@ public final class UnlinkedHyperBookItem extends Item {
         ItemStack linkedBook = new ItemStack(VerseItems.HYPER_BOOK.get());
         linkedBook.set(DataComponents.WRITTEN_BOOK_CONTENT, createWrittenBookContent(dimensionName, targetPosition));
         linkedBook.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, Component.literal("Hyperbook - " + dimensionName).withStyle(ChatFormatting.LIGHT_PURPLE));
-        new HyperBookData(dimensionId, dimensionName, null, targetPosition, player.getYRot(), player.getXRot()).apply(linkedBook);
+        new HyperBookData(dimensionId, dimensionName, player.getUUID(), null, targetPosition, player.getYRot(), player.getXRot()).apply(linkedBook);
         player.setItemInHand(hand, linkedBook);
         level.playSound(null, player.blockPosition(), SoundEvents.ENDERMAN_TELEPORT, SoundSource.PLAYERS, 0.8F, 1.05F);
         if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {

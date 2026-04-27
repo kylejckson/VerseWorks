@@ -1,0 +1,24 @@
+{
+  "id": "tools_and_debug",
+  "title_key": "guidebook.chapter.tools_and_debug.title",
+  "summary_key": "guidebook.chapter.tools_and_debug.summary",
+  "sort_order": 7,
+  "icon": {
+    "type": "item",
+    "value": "verseworks:dimensional_analyzer"
+  },
+  "pages": [
+    {
+      "type": "item_spotlight",
+      "title_key": "guidebook.entry.tools_analyzer.title",
+      "body_keys": [
+        "guidebook.entry.tools_analyzer.body.1"
+      ],
+      "icon_label_key": "item.verseworks.dimensional_analyzer",
+      "icon": {
+        "type": "item",
+        "value": "verseworks:dimensional_analyzer"
+      }
+    }
+  ]
+}

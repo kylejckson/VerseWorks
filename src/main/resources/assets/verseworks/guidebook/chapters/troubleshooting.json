@@ -1,0 +1,19 @@
+{
+  "id": "troubleshooting",
+  "title_key": "guidebook.chapter.troubleshooting.title",
+  "summary_key": "guidebook.chapter.troubleshooting.summary",
+  "sort_order": 8,
+  "icon": {
+    "type": "item",
+    "value": "minecraft:redstone_torch"
+  },
+  "pages": [
+    {
+      "type": "text",
+      "title_key": "guidebook.entry.troubleshooting_common.title",
+      "body_keys": [
+        "guidebook.entry.troubleshooting_common.body.1"
+      ]
+    }
+  ]
+}

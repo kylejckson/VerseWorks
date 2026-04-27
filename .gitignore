@@ -29,6 +29,8 @@ repo/
 # Runtime data and local test worlds
 run/
 run-data/
+/release
+.release-build
 logs/
 crash-reports/
 hs_err_pid*.log

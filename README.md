@@ -2,6 +2,8 @@
 
 VerseWorks is a NeoForge mod for Minecraft 1.21.1.
 
+Current release version: 1.2.2.
+
 This repository is the working source for the mod. The current build is early and experimental. Expect rough edges, placeholder assets, and systems that may change without much ceremony between iterations.
 
 ## Requirements

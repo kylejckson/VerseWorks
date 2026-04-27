@@ -143,6 +143,10 @@ public record VerseData(
         } else {
             baseName = this.prefix + " " + this.label;
         }
-        return Component.literal("Verse: " + baseName.trim());
+        String displayName = baseName.trim();
+        if (displayName.isEmpty()) {
+            displayName = "Unknown";
+        }
+        return Component.literal("Verse: " + displayName);
     }
 }

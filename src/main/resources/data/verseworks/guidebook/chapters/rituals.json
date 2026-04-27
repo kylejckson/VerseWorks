@@ -1,0 +1,62 @@
+{
+  "id": "rituals",
+  "title_key": "guidebook.chapter.rituals.title",
+  "summary_key": "guidebook.chapter.rituals.summary",
+  "sort_order": 3,
+  "icon": {
+    "type": "texture",
+    "value": "verseworks:textures/gui/guidebook/chapter_rituals.png"
+  },
+  "pages": [
+    {
+      "type": "image",
+      "title_key": "guidebook.entry.rituals_cauldron.title",
+      "body_keys": [
+        "guidebook.entry.rituals_cauldron.body.1",
+        "guidebook.entry.rituals_cauldron.body.2"
+      ],
+      "image": "verseworks:textures/gui/guidebook/images/ritual_cauldron_setup.png"
+    },
+    {
+      "type": "ritual_layout",
+      "title_key": "guidebook.entry.rituals_duplicate.title",
+      "body_keys": [
+        "guidebook.entry.rituals_duplicate.body.1"
+      ],
+      "icon": {
+        "type": "item",
+        "value": "minecraft:cauldron"
+      },
+      "ingredients": [
+        {
+          "type": "item",
+          "value": "verseworks:verse"
+        },
+        {
+          "type": "item",
+          "value": "verseworks:hyper_dust"
+        },
+        {
+          "type": "item",
+          "value": "verseworks:blank_verse"
+        },
+        {
+          "type": "item",
+          "value": "minecraft:glow_ink_sac"
+        }
+      ],
+      "notes": [
+        "guidebook.note.ritual_layout.cauldron",
+        "guidebook.note.ritual_layout.verses"
+      ]
+    },
+    {
+      "type": "image",
+      "title_key": "guidebook.entry.rituals_hyperbook.title",
+      "body_keys": [
+        "guidebook.entry.rituals_hyperbook.body.1"
+      ],
+      "image": "verseworks:textures/gui/guidebook/images/ritual_linked_hyperbook.png"
+    }
+  ]
+}

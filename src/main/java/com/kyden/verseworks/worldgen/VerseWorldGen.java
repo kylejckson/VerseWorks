@@ -24,6 +24,11 @@ public final class VerseWorldGen {
         () -> new MysticCrystalCaveFeature(NoneFeatureConfiguration.CODEC)
     );
 
+    public static final DeferredHolder<Feature<?>, Feature<NoneFeatureConfiguration>> GIANT_CRYSTAL = FEATURES.register(
+        "giant_crystal",
+        () -> new GiantCrystalFeature(NoneFeatureConfiguration.CODEC)
+    );
+
     public static final DeferredHolder<StructureType<?>, StructureType<MysticRuinStructure>> MYSTIC_RUIN = STRUCTURE_TYPES.register(
         "mystic_ruin",
         () -> () -> MysticRuinStructure.CODEC

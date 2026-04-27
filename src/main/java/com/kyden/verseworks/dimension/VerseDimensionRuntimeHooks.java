@@ -1,5 +1,6 @@
 package com.kyden.verseworks.dimension;
 
+import com.kyden.verseworks.Config;
 import com.kyden.verseworks.advancement.VerseWorksAdvancements;
 import com.kyden.verseworks.VerseWorks;
 import com.kyden.verseworks.block.VerseBlocks;
@@ -8,6 +9,7 @@ import com.kyden.verseworks.block.WarpVineBlock;
 import com.kyden.verseworks.entity.MeteorEntity;
 import com.kyden.verseworks.ritual.HyperBookRitualHooks;
 import com.kyden.verseworks.sound.VerseSounds;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -49,6 +51,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.EntityTeleportEvent;
+import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
@@ -57,6 +60,7 @@ import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
@@ -85,7 +89,8 @@ public final class VerseDimensionRuntimeHooks {
     private static final int POI_GUARD_SCAN_INTERVAL_TICKS = 20;
     private static final int POI_GUARD_CHUNK_RADIUS = 2;
     private static final int BLOCK_ENTITY_GUARD_CHUNK_RADIUS = 1;
-    private static final int PLAYER_ENTRY_GUARD_CHUNK_RADIUS = 2;
+    private static final int PLAYER_ENTRY_RELEASE_CHUNK_RADIUS = 0;
+    private static final int PLAYER_ENTRY_WARMUP_CHUNK_RADIUS = 2;
     private static final int LIGHTNING_HAZARD_SCAN_INTERVAL_TICKS = 12;
     private static final int LIGHTNING_DIRECT_STRIKE_INTERVAL_TICKS = 90;
     private static final int LIGHTNING_ARC_MIN_RADIUS = 20;
@@ -110,13 +115,18 @@ public final class VerseDimensionRuntimeHooks {
     private static final int COMMAND_TELEPORT_TIMEOUT_TICKS = 20 * 20;
     private static final int HYPER_BOOK_WARMUP_RADIUS = 2;
     private static final int HYPER_BOOK_TELEPORT_TIMEOUT_TICKS = 20 * 10;
+    private static final int HYPER_BOOK_READY_TICKET_TICKS = 20 * 30;
     private static final long SLOW_ENTRY_PREPARATION_THRESHOLD_NANOS = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(10);
     private static final long STARTUP_DIMENSION_IDLE_UNLOAD_DELAY_TICKS = 20L * 5L;
-    private static final long RUNTIME_DIMENSION_IDLE_SLEEP_DELAY_TICKS = 20L * 45L;
+    private static final long STARTUP_PREPARATION_STAGGER_TICKS = 20L;
+    private static final long RUNTIME_DIMENSION_IDLE_SLEEP_DELAY_TICKS = 20L * 60L * 5L;
     private static final long RUNTIME_DIMENSION_IDLE_UNLOAD_DELAY_TICKS = 20L * 60L * 5L;
     private static final long RUNTIME_DIMENSION_IDLE_HOUSEKEEPING_INTERVAL_TICKS = 20L * 15L;
     private static final Block DEFAULT_SAFETY_PLATFORM_BLOCK = Blocks.COBBLESTONE;
-    private static final int DEFAULT_SAFETY_PLATFORM_RADIUS = 1;
+    private static final int DEFAULT_SAFETY_PLATFORM_RADIUS = 2;
+    private static final Component EXTERNAL_VERSE_ENTRY_BLOCKED_MESSAGE = Component.literal(
+        "This dimension is too difficult to reach, use a hyperbook instead to tunnel space-time and teleport into it"
+    ).withStyle(ChatFormatting.YELLOW);
     // These caches coordinate live-only runtime state for generated dimensions and are rebuilt
     // from saved metadata whenever a level is reactivated.
     private static final Map<net.minecraft.resources.ResourceKey<Level>, Double> TIME_RATE_ACCUMULATORS = new ConcurrentHashMap<>();
@@ -126,12 +136,14 @@ public final class VerseDimensionRuntimeHooks {
     private static final Map<net.minecraft.resources.ResourceKey<Level>, PreparationWarmupTicket> ENTRY_PREPARATION_TICKETS = new ConcurrentHashMap<>();
     private static final Map<net.minecraft.resources.ResourceKey<Level>, ChunkDecorationState> DECORATED_CHUNKS = new ConcurrentHashMap<>();
     private static final Map<net.minecraft.resources.ResourceKey<Level>, Map<Integer, PendingCommandTeleport>> PENDING_COMMAND_TELEPORTS = new ConcurrentHashMap<>();
+    private static final Map<net.minecraft.resources.ResourceKey<Level>, Map<Integer, PendingCommandEntry>> PENDING_COMMAND_ENTRIES = new ConcurrentHashMap<>();
     private static final Map<net.minecraft.resources.ResourceKey<Level>, Map<Integer, PendingHyperBookTeleport>> PENDING_HYPER_BOOK_TELEPORTS = new ConcurrentHashMap<>();
     private static final Map<net.minecraft.resources.ResourceKey<Level>, Set<UUID>> PAUSED_POI_VILLAGERS = new ConcurrentHashMap<>();
     private static final Map<net.minecraft.resources.ResourceKey<Level>, Long> NEXT_METEOR_SHOWER_TICKS = new ConcurrentHashMap<>();
     private static final Map<net.minecraft.resources.ResourceKey<Level>, Long> NEXT_WARP_SPAWN_TICKS = new ConcurrentHashMap<>();
     private static final Map<net.minecraft.resources.ResourceKey<Level>, Long> LAST_ACTIVE_TICKS = new ConcurrentHashMap<>();
     private static final Map<UUID, PendingPlayerEntry> PENDING_PLAYER_ENTRIES = new ConcurrentHashMap<>();
+    private static final Map<UUID, AuthorizedVerseEntry> AUTHORIZED_VERSE_ENTRIES = new ConcurrentHashMap<>();
     private static final Set<String> PENDING_TELEPORT_MESSAGE_COORDINATES = ConcurrentHashMap.newKeySet();
     private static final String CORRUPTION_WARNINGS_TAG = "VerseWorksCorruptionWarnings";
     private static final Set<net.minecraft.resources.ResourceKey<Level>> LEGACY_WEATHER_WARNING_DIMENSIONS = ConcurrentHashMap.newKeySet();
@@ -142,6 +154,10 @@ public final class VerseDimensionRuntimeHooks {
     private static final Set<String> ACTIVE_PACK_ENABLE_REQUESTED = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, ResourceLocation> STARTUP_EXPECTED_PLAYER_DIMENSIONS = new ConcurrentHashMap<>();
     private static final Set<ResourceLocation> STARTUP_PROTECTED_PLAYER_DIMENSIONS = ConcurrentHashMap.newKeySet();
+    private static final Set<ResourceLocation> STARTUP_PREPARED_DIMENSIONS = ConcurrentHashMap.newKeySet();
+    private static final Deque<StartupPreparedDimension> STARTUP_PREPARATION_QUEUE = new ArrayDeque<>();
+    private static StartupPreparedDimension activeStartupPreparation;
+    private static long nextStartupPreparationTick;
     private static Field blockEntityTickersField;
     private static Field pendingBlockEntityTickersField;
     private static Field levelDataField;
@@ -162,6 +178,7 @@ public final class VerseDimensionRuntimeHooks {
         NeoForge.EVENT_BUS.addListener(VerseDimensionRuntimeHooks::onLevelTickPre);
         NeoForge.EVENT_BUS.addListener(VerseDimensionRuntimeHooks::onLevelTick);
         NeoForge.EVENT_BUS.addListener(VerseDimensionRuntimeHooks::onPlayerTick);
+        NeoForge.EVENT_BUS.addListener(VerseDimensionRuntimeHooks::onEntityTravelToDimension);
         NeoForge.EVENT_BUS.addListener(VerseDimensionRuntimeHooks::onTeleportCommand);
         NeoForge.EVENT_BUS.addListener(VerseDimensionRuntimeHooks::onPlayerLoggedIn);
         NeoForge.EVENT_BUS.addListener(VerseDimensionRuntimeHooks::onPlayerLoggedOut);
@@ -232,8 +249,8 @@ public final class VerseDimensionRuntimeHooks {
         ensureMutableWeatherData(level);
         VerseDimensionCatalog.remember(level.dimension().location(), parameters);
         LAST_ACTIVE_TICKS.put(level.dimension(), level.getGameTime());
-        if (parameters.timeOfDay() != null) {
-            level.setDayTime(parameters.resolvedTimeOfDay());
+        if (parameters.timeOfDay() != null || parameters.forcesPermanentNight()) {
+            level.setDayTime(parameters.effectiveResolvedTimeOfDay());
         }
         applyWeatherRules(level, parameters);
     }
@@ -250,20 +267,15 @@ public final class VerseDimensionRuntimeHooks {
         long startedAtNanos = System.nanoTime();
         ChunkPos entryChunk = LiveDimensionInstantiator.getEntryChunk(level);
         int searchRadius = shouldPreferNaturalSpawn(parameters) ? naturalSpawnSearchRadius(parameters) : 0;
+        CompletableFuture<?> warmupFuture = loadChunks(level, entryChunk, searchRadius);
         PendingSpawnPreparation pending = new PendingSpawnPreparation(
             parameters,
             entryChunk,
             searchRadius,
-            searchRadius > 0
-                ? warmChunks(level, entryChunk, searchRadius)
-                : CompletableFuture.completedFuture(null)
+            warmupFuture
         );
         PENDING_SPAWN_PREPARATIONS.put(level.dimension(), pending);
-        if (searchRadius > 0) {
-            ENTRY_PREPARATION_TICKETS.put(level.dimension(), new PreparationWarmupTicket(entryChunk, searchRadius));
-        } else {
-            ENTRY_PREPARATION_TICKETS.remove(level.dimension());
-        }
+        ENTRY_PREPARATION_TICKETS.put(level.dimension(), new PreparationWarmupTicket(entryChunk, searchRadius));
         logSlowEntryPreparation(level, startedAtNanos, "Queued entry preparation");
     }
 
@@ -289,6 +301,10 @@ public final class VerseDimensionRuntimeHooks {
     }
 
     public static boolean isDimensionPinned(ServerLevel level) {
+        return isChunkForcedPinned(level);
+    }
+
+    private static boolean isChunkForcedPinned(ServerLevel level) {
         return !level.getForcedChunks().isEmpty();
     }
 
@@ -334,12 +350,15 @@ public final class VerseDimensionRuntimeHooks {
             return preparedArrival.get();
         }
 
-        BlockPos resolvedArrival = prepareEntryArrival(destination, parameters, entryChunk);
-        PREPARED_ENTRY_POINTS.put(destination.dimension(), resolvedArrival);
+        BlockPos resolvedArrival = resolvePreparedEntryPoint(destination, parameters, entryChunk);
         return Vec3.atBottomCenterOf(resolvedArrival);
     }
 
     public static void registerPendingPlayerEntry(ServerPlayer player, ServerLevel destination, Vec3 arrival) {
+        registerPendingPlayerEntry(player, destination, arrival, true);
+    }
+
+    public static void registerPendingPlayerEntry(ServerPlayer player, ServerLevel destination, Vec3 arrival, boolean recordVisitOnArrival) {
         if (isShutdownInProgress(destination.getServer())) {
             return;
         }
@@ -348,51 +367,151 @@ public final class VerseDimensionRuntimeHooks {
             return;
         }
 
-        PendingPlayerEntry pendingEntry = new PendingPlayerEntry(destination.dimension(), arrival, player.getYRot(), player.getXRot());
+        PendingPlayerEntry pendingEntry = new PendingPlayerEntry(destination.dimension(), arrival, player.getYRot(), player.getXRot(), recordVisitOnArrival);
         PENDING_PLAYER_ENTRIES.put(player.getUUID(), pendingEntry);
         sendCorruptionWarnings(player, destination);
         stabilizePendingPlayerEntry(player, destination, pendingEntry);
     }
 
     public static boolean queueHyperBookTeleport(ServerPlayer player, ServerLevel destination, Vec3 target, float yRot, float xRot) {
+        return !ensureHyperBookTargetWarmup(player, destination, target, yRot, xRot, true);
+    }
+
+    public static boolean ensureHyperBookTargetWarmup(ServerPlayer player, ServerLevel destination, Vec3 target, float yRot, float xRot, boolean notifyWhenReady) {
         if (isShutdownInProgress(destination.getServer())) {
             return false;
         }
 
         ChunkPos targetChunk = new ChunkPos(BlockPos.containing(target));
-        if (destination.getChunkSource().getChunkNow(targetChunk.x, targetChunk.z) != null) {
-            return false;
+        if (hasReadyHyperBookTeleport(player, destination, targetChunk)) {
+            return true;
         }
 
+        boolean alreadyTicking = destination.getChunkSource().isPositionTicking(targetChunk.toLong());
         markDimensionActive(destination);
         var future = warmChunks(destination, targetChunk, HYPER_BOOK_WARMUP_RADIUS);
         Map<Integer, PendingHyperBookTeleport> pendingTeleports = PENDING_HYPER_BOOK_TELEPORTS.computeIfAbsent(destination.dimension(), ignored -> new ConcurrentHashMap<>());
-        PendingHyperBookTeleport previous = pendingTeleports.put(player.getId(), new PendingHyperBookTeleport(player, targetChunk, future, destination.getGameTime()));
+        PendingHyperBookTeleport pending = new PendingHyperBookTeleport(player, targetChunk, future, destination.getGameTime(), alreadyTicking ? destination.getGameTime() : 0L, alreadyTicking, notifyWhenReady);
+        PendingHyperBookTeleport previous = pendingTeleports.put(player.getId(), pending);
         if (previous != null) {
             releaseWarmupTicket(destination, previous.targetChunk(), HYPER_BOOK_WARMUP_RADIUS);
         }
-        return true;
+        return alreadyTicking;
+    }
+
+    public static boolean hasReadyHyperBookTeleport(ServerPlayer player, ServerLevel destination, Vec3 target) {
+        return hasReadyHyperBookTeleport(player, destination, new ChunkPos(BlockPos.containing(target)));
+    }
+
+    private static boolean hasReadyHyperBookTeleport(ServerPlayer player, ServerLevel destination, ChunkPos targetChunk) {
+        Map<Integer, PendingHyperBookTeleport> pendingTeleports = PENDING_HYPER_BOOK_TELEPORTS.get(destination.dimension());
+        if (pendingTeleports == null || pendingTeleports.isEmpty()) {
+            return false;
+        }
+
+        PendingHyperBookTeleport pending = pendingTeleports.get(player.getId());
+        return pending != null
+            && pending.notified()
+            && pending.targetChunk().equals(targetChunk)
+            && !pending.warmupFuture().isCompletedExceptionally();
+    }
+
+    public static void queueCommandEntry(Entity entity, ServerLevel destination) {
+        if (entity == null || entity.isRemoved() || isShutdownInProgress(destination.getServer())) {
+            return;
+        }
+
+        cancelPendingCommandEntries(entity);
+        markDimensionActive(destination);
+        if (!hasPendingEntryPreparation(destination) && !LiveDimensionInstantiator.isReadyForEntry(destination)) {
+            LiveDimensionInstantiator.requestEntryWarmup(destination);
+        }
+
+        PENDING_COMMAND_ENTRIES
+            .computeIfAbsent(destination.dimension(), ignored -> new ConcurrentHashMap<>())
+            .put(entity.getId(), new PendingCommandEntry(entity, destination.getGameTime()));
     }
 
     public static boolean hasPendingTeleportWork() {
         return PENDING_COMMAND_TELEPORTS.values().stream().anyMatch(map -> map != null && !map.isEmpty())
+            || PENDING_COMMAND_ENTRIES.values().stream().anyMatch(map -> map != null && !map.isEmpty())
             || PENDING_HYPER_BOOK_TELEPORTS.values().stream().anyMatch(map -> map != null && !map.isEmpty());
+    }
+
+    public static void cancelDimensionWork(MinecraftServer server, ResourceLocation dimensionId) {
+        net.minecraft.resources.ResourceKey<Level> levelKey = net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimensionId);
+        ServerLevel level = server.getLevel(levelKey);
+
+        Map<Integer, PendingCommandTeleport> pendingCommandTeleports = PENDING_COMMAND_TELEPORTS.remove(levelKey);
+        if (pendingCommandTeleports != null) {
+            for (PendingCommandTeleport pending : pendingCommandTeleports.values()) {
+                PENDING_TELEPORT_MESSAGE_COORDINATES.remove(pending.coordinateKey());
+                if (level != null) {
+                    releaseWarmupTicket(level, pending.targetChunk(), COMMAND_TELEPORT_WARMUP_RADIUS);
+                }
+                if (pending.entity() instanceof ServerPlayer player) {
+                    player.sendSystemMessage(Component.literal("Teleport canceled; the destination dimension has collapsed.").withStyle(net.minecraft.ChatFormatting.RED));
+                }
+            }
+        }
+
+        Map<Integer, PendingHyperBookTeleport> pendingHyperBookTeleports = PENDING_HYPER_BOOK_TELEPORTS.remove(levelKey);
+        if (pendingHyperBookTeleports != null) {
+            for (PendingHyperBookTeleport pending : pendingHyperBookTeleports.values()) {
+                if (level != null) {
+                    releaseWarmupTicket(level, pending.targetChunk(), HYPER_BOOK_WARMUP_RADIUS);
+                }
+                pending.player().sendSystemMessage(Component.literal("That Hyperbook's destination has collapsed.").withStyle(net.minecraft.ChatFormatting.RED));
+            }
+        }
+
+        PENDING_COMMAND_ENTRIES.remove(levelKey);
+        PENDING_PLAYER_ENTRIES.entrySet().removeIf(entry -> entry.getValue().levelKey().equals(levelKey));
+        if (level != null) {
+            releaseEntryPreparationTicket(level);
+        }
+        clearRuntimeLevelState(levelKey);
+    }
+
+    public static boolean unloadRuntimeLevelForCollapse(ServerLevel level) {
+        for (long forcedChunk : level.getForcedChunks().toLongArray()) {
+            ChunkPos chunkPos = new ChunkPos(forcedChunk);
+            level.setChunkForced(chunkPos.x, chunkPos.z, false);
+        }
+        return unloadRuntimeLevel(level, true, true, "dimension collapse");
+    }
+
+    public static void forgetStartupDimension(ResourceLocation dimensionId) {
+        STARTUP_EXPECTED_PLAYER_DIMENSIONS.entrySet().removeIf(entry -> dimensionId.equals(entry.getValue()));
+        STARTUP_PROTECTED_PLAYER_DIMENSIONS.remove(dimensionId);
+        STARTUP_PREPARED_DIMENSIONS.remove(dimensionId);
+        STARTUP_PREPARATION_QUEUE.removeIf(preparation -> preparation.dimensionId().equals(dimensionId));
+        if (activeStartupPreparation != null && activeStartupPreparation.dimensionId().equals(dimensionId)) {
+            activeStartupPreparation = null;
+        }
+        refreshStartupProtectedPlayerDimensions();
+    }
+
+    public static void syncLifecycleState(MinecraftServer server, String reason) {
+        syncLifecyclePersistence(server, false, reason);
     }
 
     public static void performHyperBookTeleport(ServerPlayer player, ServerLevel destination, Vec3 target, float yRot, float xRot) {
         markDimensionActive(destination);
+        boolean crossDimensionEntry = player.level() != destination;
         if (player.level() == destination) {
             player.moveTo(target.x, target.y, target.z, yRot, xRot);
             player.connection.teleport(target.x, target.y, target.z, yRot, xRot);
             player.connection.resetPosition();
         } else {
-            player.teleportTo(destination, target.x, target.y, target.z, Set.<RelativeMovement>of(), yRot, xRot);
+            teleportWithVerseEntryAuthorization(player, destination, target, yRot, xRot);
         }
 
         if (isVerseWorksLevel(destination)) {
-            registerPendingPlayerEntry(player, destination, target);
+            registerPendingPlayerEntry(player, destination, target, crossDimensionEntry);
             VerseWorksAdvancements.award(player, VerseWorksAdvancements.ENTER_A_NEW_WORLD, "entered_world");
         }
+        clearReadyHyperBookWarmup(player, destination, new ChunkPos(BlockPos.containing(target)));
     }
 
     private static void onLevelTickPre(LevelTickEvent.Pre event) {
@@ -427,6 +546,44 @@ public final class VerseDimensionRuntimeHooks {
         regulatePoiVillagers(level);
     }
 
+    private static void onEntityTravelToDimension(EntityTravelToDimensionEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) {
+            return;
+        }
+
+        if (!VerseWorks.MODID.equals(event.getDimension().location().getNamespace())) {
+            return;
+        }
+
+        if (consumeAuthorizedVerseEntry(player, event.getDimension())) {
+            return;
+        }
+
+        MinecraftServer server = player.getServer();
+        if (server == null || isShutdownInProgress(server)) {
+            return;
+        }
+
+        ServerLevel destination = server.getLevel(event.getDimension());
+        if (destination == null) {
+            event.setCanceled(true);
+            player.sendSystemMessage(EXTERNAL_VERSE_ENTRY_BLOCKED_MESSAGE);
+            return;
+        }
+
+        ensureEntryPreparationScheduled(server, destination);
+        if (LiveDimensionInstantiator.isRuntimeLevel(destination) && !LiveDimensionInstantiator.isReadyForEntry(destination)) {
+            LiveDimensionInstantiator.requestEntryWarmup(destination);
+        }
+
+        if (hasPendingEntryPreparation(destination)
+            || preparedEntryArrival(destination).isEmpty()
+            || (LiveDimensionInstantiator.isRuntimeLevel(destination) && !LiveDimensionInstantiator.isReadyForEntry(destination))) {
+            event.setCanceled(true);
+            player.sendSystemMessage(EXTERNAL_VERSE_ENTRY_BLOCKED_MESSAGE);
+        }
+    }
+
     private static void onLevelTick(LevelTickEvent.Post event) {
         if (!(event.getLevel() instanceof ServerLevel level)) {
             return;
@@ -441,7 +598,9 @@ public final class VerseDimensionRuntimeHooks {
         if (level == level.getServer().overworld()) {
             ensureLifecycleStartupState(level.getServer());
             VerseDimensionCatalog.ensureLoaded(level.getServer());
+            processStartupPreparationQueue(level.getServer(), level.getGameTime());
             VerseChunkWarmup.tickAll(level.getServer());
+            processPendingVerseDimensionWork(level.getServer(), level);
             if (level.getGameTime() % RUNTIME_DIMENSION_IDLE_HOUSEKEEPING_INTERVAL_TICKS == 0L
                 && !HyperBookRitualHooks.hasRecentRitualActivity(level)) {
                 maintainSleepingRuntimeLevels(level.getServer(), level);
@@ -449,6 +608,7 @@ public final class VerseDimensionRuntimeHooks {
         }
 
         processPendingCommandTeleports(level);
+        processPendingCommandEntries(level);
         processPendingHyperBookTeleports(level);
 
         Optional<VerseDimensionParameters> parameters = resolveParameters(level);
@@ -472,6 +632,23 @@ public final class VerseDimensionRuntimeHooks {
         applyLightningHazards(level, dimensionParameters);
         applyMeteorShowers(level, dimensionParameters);
         applyWarpSpawns(level, dimensionParameters);
+    }
+
+    private static void processPendingVerseDimensionWork(MinecraftServer server, ServerLevel excludedLevel) {
+        for (ServerLevel level : new ArrayList<>(server.forgeGetWorldMap().values())) {
+            if (level == null || level == excludedLevel || !isVerseWorksLevel(level)) {
+                continue;
+            }
+
+            if (resolveParameters(level).isEmpty()) {
+                continue;
+            }
+
+            processPendingSpawnPreparation(level);
+            processDecorationJobs(level);
+            processPendingCommandEntries(level);
+            processPendingHyperBookTeleports(level);
+        }
     }
 
     private static void regulatePoiVillagers(ServerLevel level) {
@@ -524,11 +701,14 @@ public final class VerseDimensionRuntimeHooks {
             }
 
             ChunkPos arrivalChunk = new ChunkPos(BlockPos.containing(pendingEntry.arrival()));
-            if (hasEntityTickingChunkRing(level, arrivalChunk, PLAYER_ENTRY_GUARD_CHUNK_RADIUS)) {
+            if (hasEntityTickingChunkRing(level, arrivalChunk, PLAYER_ENTRY_RELEASE_CHUNK_RADIUS)) {
                 PENDING_PLAYER_ENTRIES.remove(player.getUUID(), pendingEntry);
-                releaseWarmupTicket(level, arrivalChunk, PLAYER_ENTRY_GUARD_CHUNK_RADIUS);
+                releaseWarmupTicket(level, arrivalChunk, PLAYER_ENTRY_WARMUP_CHUNK_RADIUS);
                 player.setNoGravity(false);
                 player.connection.resetPosition();
+                if (pendingEntry.recordVisitOnArrival()) {
+                    recordDimensionVisit(level.getServer(), level.dimension().location());
+                }
                 continue;
             }
 
@@ -546,7 +726,7 @@ public final class VerseDimensionRuntimeHooks {
         player.moveTo(arrival.x(), arrival.y(), arrival.z(), pendingEntry.yRot(), pendingEntry.xRot());
         player.connection.teleport(arrival.x(), arrival.y(), arrival.z(), pendingEntry.yRot(), pendingEntry.xRot());
         player.connection.resetPosition();
-        warmChunks(level, new ChunkPos(BlockPos.containing(arrival)), PLAYER_ENTRY_GUARD_CHUNK_RADIUS);
+        warmChunks(level, new ChunkPos(BlockPos.containing(arrival)), PLAYER_ENTRY_WARMUP_CHUNK_RADIUS);
     }
 
     private static void stabilizePendingHyperBookSourceWaits(ServerLevel level) {
@@ -562,7 +742,7 @@ public final class VerseDimensionRuntimeHooks {
         }
 
         VerseDimensionParameters dimensionParameters = parameters.get();
-        if (!dimensionParameters.worldType().isVoid() && dimensionParameters.oceanLevel() == null) {
+        if (!dimensionParameters.requiresSafetyPlatformSpawn()) {
             return;
         }
 
@@ -613,7 +793,7 @@ public final class VerseDimensionRuntimeHooks {
     private static boolean hasEntityTickingChunkRing(ServerLevel level, ChunkPos centerChunk, int radius) {
         for (int chunkX = centerChunk.x - radius; chunkX <= centerChunk.x + radius; chunkX++) {
             for (int chunkZ = centerChunk.z - radius; chunkZ <= centerChunk.z + radius; chunkZ++) {
-                if (level.getChunkSource().getChunkNow(chunkX, chunkZ) == null) {
+                if (!level.getChunkSource().isPositionTicking(ChunkPos.asLong(chunkX, chunkZ))) {
                     return false;
                 }
             }
@@ -833,7 +1013,7 @@ public final class VerseDimensionRuntimeHooks {
         }
 
         ChunkPos targetChunk = new ChunkPos(BlockPos.containing(event.getTarget()));
-        if (level.getChunkSource().getChunkNow(targetChunk.x, targetChunk.z) != null) {
+        if (level.getChunkSource().isPositionTicking(targetChunk.toLong())) {
             return;
         }
 
@@ -917,6 +1097,75 @@ public final class VerseDimensionRuntimeHooks {
         }
     }
 
+    private static void processPendingCommandEntries(ServerLevel level) {
+        Map<Integer, PendingCommandEntry> pendingEntries = PENDING_COMMAND_ENTRIES.get(level.dimension());
+        if (pendingEntries == null || pendingEntries.isEmpty()) {
+            return;
+        }
+
+        if (!hasPendingEntryPreparation(level) && !LiveDimensionInstantiator.isReadyForEntry(level)) {
+            LiveDimensionInstantiator.requestEntryWarmup(level);
+        }
+        if (hasPendingEntryPreparation(level) || !LiveDimensionInstantiator.isReadyForEntry(level) || preparedEntryArrival(level).isEmpty()) {
+            return;
+        }
+
+        List<Integer> completed = new ArrayList<>();
+        for (Map.Entry<Integer, PendingCommandEntry> entry : pendingEntries.entrySet()) {
+            PendingCommandEntry pending = entry.getValue();
+            Entity entity = pending.entity();
+            if (entity == null || entity.isRemoved()) {
+                completed.add(entry.getKey());
+                continue;
+            }
+
+            try {
+                teleportQueuedCommandEntry(entity, level);
+            } catch (Exception exception) {
+                VerseWorks.LOGGER.warn("VerseWorks could not complete queued command entry into {}", level.dimension().location(), exception);
+                if (entity instanceof ServerPlayer player) {
+                    player.sendSystemMessage(Component.literal("Queued entry into " + level.dimension().location() + " failed: " + exception.getClass().getSimpleName()));
+                }
+            }
+            completed.add(entry.getKey());
+        }
+
+        completed.forEach(pendingEntries::remove);
+        if (pendingEntries.isEmpty()) {
+            PENDING_COMMAND_ENTRIES.remove(level.dimension());
+        }
+    }
+
+    private static void teleportQueuedCommandEntry(Entity entity, ServerLevel destination) {
+        Vec3 arrival = findSafeArrival(destination);
+        boolean crossDimensionEntry = entity.level() != destination;
+        if (entity.level() == destination) {
+            entity.moveTo(arrival.x, arrival.y, arrival.z, entity.getYRot(), entity.getXRot());
+            if (entity instanceof ServerPlayer player) {
+                player.connection.teleport(arrival.x, arrival.y, arrival.z, player.getYRot(), player.getXRot());
+                player.connection.resetPosition();
+            }
+        } else {
+            teleportWithVerseEntryAuthorization(entity, destination, arrival, entity.getYRot(), entity.getXRot());
+        }
+
+        if (entity instanceof ServerPlayer player) {
+            registerPendingPlayerEntry(player, destination, arrival, crossDimensionEntry);
+            player.sendSystemMessage(Component.literal("Teleported to " + destination.dimension().location()));
+        }
+    }
+
+    private static void cancelPendingCommandEntries(Entity entity) {
+        int entityId = entity.getId();
+        for (Map<Integer, PendingCommandEntry> pendingEntries : PENDING_COMMAND_ENTRIES.values()) {
+            if (pendingEntries == null) {
+                continue;
+            }
+
+            pendingEntries.remove(entityId);
+        }
+    }
+
     private static void processPendingHyperBookTeleports(ServerLevel level) {
         Map<Integer, PendingHyperBookTeleport> pendingTeleports = PENDING_HYPER_BOOK_TELEPORTS.get(level.dimension());
         if (pendingTeleports == null || pendingTeleports.isEmpty()) {
@@ -939,23 +1188,54 @@ public final class VerseDimensionRuntimeHooks {
                 continue;
             }
 
-            boolean timedOut = level.getGameTime() - pending.queuedAtGameTime() >= HYPER_BOOK_TELEPORT_TIMEOUT_TICKS;
-            if (!pending.warmupFuture().isDone() && !timedOut) {
+            boolean warmupDone = pending.notified() || pending.warmupFuture().isDone();
+            boolean timedOut = !warmupDone && level.getGameTime() - pending.queuedAtGameTime() >= HYPER_BOOK_TELEPORT_TIMEOUT_TICKS;
+            if (!warmupDone && !timedOut) {
                 continue;
             }
 
-            releaseWarmupTicket(level, pending.targetChunk(), HYPER_BOOK_WARMUP_RADIUS);
             if (timedOut) {
+                releaseWarmupTicket(level, pending.targetChunk(), HYPER_BOOK_WARMUP_RADIUS);
                 player.sendSystemMessage(Component.literal("The Hyperbook is still tunneling. Try again soon.").withStyle(net.minecraft.ChatFormatting.YELLOW));
-            } else {
-                player.sendSystemMessage(Component.literal("The Hyperbook has finished tunneling.").withStyle(net.minecraft.ChatFormatting.AQUA));
+                completed.add(entry.getKey());
+                continue;
             }
-            completed.add(entry.getKey());
+
+            if (!pending.notified()) {
+                if (pending.notifyWhenReady()) {
+                    player.sendSystemMessage(Component.literal("The Hyperbook has finished tunneling.").withStyle(net.minecraft.ChatFormatting.AQUA));
+                }
+                pendingTeleports.put(entry.getKey(), pending.markNotified(level.getGameTime()));
+                continue;
+            }
+
+            if (level.getGameTime() - pending.readyAtGameTime() >= HYPER_BOOK_READY_TICKET_TICKS) {
+                releaseWarmupTicket(level, pending.targetChunk(), HYPER_BOOK_WARMUP_RADIUS);
+                completed.add(entry.getKey());
+            }
         }
 
         completed.forEach(pendingTeleports::remove);
         if (pendingTeleports.isEmpty()) {
             PENDING_HYPER_BOOK_TELEPORTS.remove(level.dimension());
+        }
+    }
+
+    private static void clearReadyHyperBookWarmup(ServerPlayer player, ServerLevel destination, ChunkPos targetChunk) {
+        Map<Integer, PendingHyperBookTeleport> pendingTeleports = PENDING_HYPER_BOOK_TELEPORTS.get(destination.dimension());
+        if (pendingTeleports == null || pendingTeleports.isEmpty()) {
+            return;
+        }
+
+        PendingHyperBookTeleport pending = pendingTeleports.get(player.getId());
+        if (pending == null || !pending.targetChunk().equals(targetChunk)) {
+            return;
+        }
+
+        pendingTeleports.remove(player.getId());
+        releaseWarmupTicket(destination, pending.targetChunk(), HYPER_BOOK_WARMUP_RADIUS);
+        if (pendingTeleports.isEmpty()) {
+            PENDING_HYPER_BOOK_TELEPORTS.remove(destination.dimension(), pendingTeleports);
         }
     }
 
@@ -1013,6 +1293,10 @@ public final class VerseDimensionRuntimeHooks {
         ACTIVE_PACK_ENABLE_REQUESTED.clear();
         STARTUP_EXPECTED_PLAYER_DIMENSIONS.clear();
         STARTUP_PROTECTED_PLAYER_DIMENSIONS.clear();
+        STARTUP_PREPARED_DIMENSIONS.clear();
+        STARTUP_PREPARATION_QUEUE.clear();
+        activeStartupPreparation = null;
+        nextStartupPreparationTick = 0L;
         serverTickThread = null;
         lastServerTickNanos = 0L;
         lastServerTickDumpNanos = 0L;
@@ -1046,6 +1330,9 @@ public final class VerseDimensionRuntimeHooks {
         STARTUP_EXPECTED_PLAYER_DIMENSIONS.remove(player.getUUID());
         STARTUP_PROTECTED_PLAYER_DIMENSIONS.remove(currentDimensionId);
         refreshStartupProtectedPlayerDimensions();
+        if (VerseWorks.MODID.equals(currentDimensionId.getNamespace())) {
+            recordDimensionVisit(player.getServer(), currentDimensionId);
+        }
         VerseDimensionParameterSync.syncKnownDimensions(player);
     }
 
@@ -1054,6 +1341,7 @@ public final class VerseDimensionRuntimeHooks {
             return;
         }
 
+        AUTHORIZED_VERSE_ENTRIES.remove(player.getUUID());
         clearPendingHyperBookSourceWait(player);
 
         MinecraftServer server = ((ServerLevel) player.level()).getServer();
@@ -1079,6 +1367,14 @@ public final class VerseDimensionRuntimeHooks {
         if (isVerseWorksLevel(level)) {
             LAST_ACTIVE_TICKS.put(level.dimension(), level.getGameTime());
         }
+    }
+
+    private static void recordDimensionVisit(MinecraftServer server, ResourceLocation dimensionId) {
+        if (server == null || !VerseWorks.MODID.equals(dimensionId.getNamespace())) {
+            return;
+        }
+
+        VerseDimensionUsageSavedData.get(server).recordVisit(dimensionId, System.currentTimeMillis());
     }
 
     private static void sendCorruptionWarnings(ServerPlayer player, ServerLevel destination) {
@@ -1182,6 +1478,11 @@ public final class VerseDimensionRuntimeHooks {
 
         Map<Integer, PendingCommandTeleport> commandTeleports = PENDING_COMMAND_TELEPORTS.get(level.dimension());
         if (commandTeleports != null && !commandTeleports.isEmpty()) {
+            return true;
+        }
+
+        Map<Integer, PendingCommandEntry> commandEntries = PENDING_COMMAND_ENTRIES.get(level.dimension());
+        if (commandEntries != null && !commandEntries.isEmpty()) {
             return true;
         }
 
@@ -1301,6 +1602,21 @@ public final class VerseDimensionRuntimeHooks {
             for (ResourceLocation dimensionId : startupExpectedPlayerDimensionIds()) {
                 VerseDimensionCatalog.get(server, dimensionId).ifPresent(parameters -> startupDimensions.put(dimensionId, parameters));
             }
+            List<StartupPreparedDimension> startupPreparedDimensions = new ArrayList<>();
+            for (ResourceLocation dimensionId : selectStartupPreparedDimensions(server)) {
+                VerseDimensionCatalog.get(server, dimensionId).ifPresent(parameters -> {
+                    startupPreparedDimensions.add(new StartupPreparedDimension(dimensionId, parameters));
+                    startupDimensions.put(dimensionId, parameters);
+                });
+            }
+            STARTUP_PREPARED_DIMENSIONS.clear();
+            STARTUP_PREPARED_DIMENSIONS.addAll(startupPreparedDimensions.stream().map(StartupPreparedDimension::dimensionId).toList());
+            STARTUP_PREPARATION_QUEUE.clear();
+            activeStartupPreparation = null;
+            nextStartupPreparationTick = 0L;
+            for (StartupPreparedDimension preparation : startupPreparedDimensions) {
+                STARTUP_PREPARATION_QUEUE.addLast(preparation);
+            }
             refreshStartupProtectedPlayerDimensions();
 
             for (Map.Entry<ResourceLocation, VerseDimensionParameters> entry : startupDimensions.entrySet()) {
@@ -1310,6 +1626,7 @@ public final class VerseDimensionRuntimeHooks {
             if (!startupDimensions.isEmpty()) {
                 ensureActivePackSelected(server);
             }
+            unloadUnselectedStartupPackLevels(server, startupDimensions.keySet(), "startup active-pack cleanup");
 
             for (Map.Entry<ResourceLocation, VerseDimensionParameters> entry : startupDimensions.entrySet()) {
                 if (server.getLevel(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, entry.getKey())) != null) {
@@ -1319,7 +1636,8 @@ public final class VerseDimensionRuntimeHooks {
                     continue;
                 }
 
-                VerseWorks.LOGGER.info("VerseWorks restoring startup dimension {} from lifecycle manifest", entry.getKey());
+                String restoreReason = STARTUP_PREPARED_DIMENSIONS.contains(entry.getKey()) ? "startup prepared pool" : "lifecycle manifest";
+                VerseWorks.LOGGER.info("VerseWorks restoring startup dimension {} from {}", entry.getKey(), restoreReason);
                 LiveDimensionInstantiator.activateAsync(server, entry.getKey(), entry.getValue());
             }
 
@@ -1330,6 +1648,125 @@ public final class VerseDimensionRuntimeHooks {
         }
     }
 
+    private static List<ResourceLocation> selectStartupPreparedDimensions(MinecraftServer server) {
+        int limit = Config.startupPreparedDimensionLimit();
+        if (limit <= 0) {
+            return List.of();
+        }
+
+        VerseDimensionUsageSavedData usageData = VerseDimensionUsageSavedData.get(server);
+        Comparator<ResourceLocation> ranking = (left, right) -> {
+            VerseDimensionUsageSavedData.UsageStats leftUsage = usageData.usage(left);
+            VerseDimensionUsageSavedData.UsageStats rightUsage = usageData.usage(right);
+            int byVisits = Long.compare(rightUsage.visitCount(), leftUsage.visitCount());
+            if (byVisits != 0) {
+                return byVisits;
+            }
+
+            int byRecency = Long.compare(rightUsage.lastVisitedAtEpochMillis(), leftUsage.lastVisitedAtEpochMillis());
+            if (byRecency != 0) {
+                return byRecency;
+            }
+
+            return left.toString().compareTo(right.toString());
+        };
+
+        return VerseDimensionCatalog.knownDimensionIds(server).stream()
+            .filter(dimensionId -> VerseWorks.MODID.equals(dimensionId.getNamespace()))
+            .filter(dimensionId -> usageData.usage(dimensionId).visitCount() > 0L)
+            .sorted(ranking)
+            .limit(limit)
+            .toList();
+    }
+
+    private static void processStartupPreparationQueue(MinecraftServer server, long gameTime) {
+        if (activeStartupPreparation != null) {
+            ResourceLocation dimensionId = activeStartupPreparation.dimensionId();
+            if (HyperBookCollapseHooks.isDimensionCollapsing(dimensionId) || !STARTUP_PREPARED_DIMENSIONS.contains(dimensionId)) {
+                finishStartupPreparation(gameTime, false);
+                return;
+            }
+
+            if (activeStartupPreparation.activationFuture() != null && !activeStartupPreparation.activationFuture().isDone()) {
+                return;
+            }
+
+            if (activeStartupPreparation.activationFuture() != null && activeStartupPreparation.activationFuture().isCompletedExceptionally()) {
+                try {
+                    activeStartupPreparation.activationFuture().join();
+                } catch (Exception exception) {
+                    VerseWorks.LOGGER.warn("VerseWorks could not activate startup-prepared dimension {}", dimensionId, exception);
+                }
+                finishStartupPreparation(gameTime, false);
+                return;
+            }
+
+            ServerLevel level = server.getLevel(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimensionId));
+            if (level == null) {
+                finishStartupPreparation(gameTime, false);
+                return;
+            }
+
+            ensureEntryPreparationScheduled(server, level, activeStartupPreparation.parameters());
+            ensureStartupEntryWarmup(level);
+            if (!isStartupPreparationReady(level)) {
+                return;
+            }
+
+            VerseWorks.LOGGER.info("VerseWorks finished startup preparation for {}", dimensionId);
+            finishStartupPreparation(gameTime, true);
+            return;
+        }
+
+        if (gameTime < nextStartupPreparationTick) {
+            return;
+        }
+
+        while (!STARTUP_PREPARATION_QUEUE.isEmpty()) {
+            StartupPreparedDimension preparation = STARTUP_PREPARATION_QUEUE.pollFirst();
+            if (preparation == null) {
+                return;
+            }
+
+            ResourceLocation dimensionId = preparation.dimensionId();
+            if (HyperBookCollapseHooks.isDimensionCollapsing(dimensionId) || !STARTUP_PREPARED_DIMENSIONS.contains(dimensionId)) {
+                continue;
+            }
+
+            ServerLevel level = server.getLevel(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimensionId));
+            if (level != null) {
+                VerseWorks.LOGGER.info("VerseWorks preparing startup-selected dimension {}", dimensionId);
+                ensureEntryPreparationScheduled(server, level, preparation.parameters());
+                ensureStartupEntryWarmup(level);
+                if (isStartupPreparationReady(level)) {
+                    VerseWorks.LOGGER.info("VerseWorks finished startup preparation for {}", dimensionId);
+                    nextStartupPreparationTick = gameTime + STARTUP_PREPARATION_STAGGER_TICKS;
+                    return;
+                }
+
+                activeStartupPreparation = preparation;
+                return;
+            }
+
+            VerseWorks.LOGGER.info("VerseWorks activating startup-selected dimension {}", dimensionId);
+            activeStartupPreparation = preparation.withActivationFuture(LiveDimensionInstantiator.activateAsync(server, dimensionId, preparation.parameters()));
+            return;
+        }
+    }
+
+    private static void finishStartupPreparation(long gameTime, boolean delayNextAttempt) {
+        activeStartupPreparation = null;
+        nextStartupPreparationTick = delayNextAttempt ? gameTime + STARTUP_PREPARATION_STAGGER_TICKS : gameTime;
+    }
+
+    private static void ensureStartupEntryWarmup(ServerLevel level) {
+        if (hasPendingEntryPreparation(level) || preparedEntryArrival(level).isEmpty() || LiveDimensionInstantiator.isReadyForEntry(level)) {
+            return;
+        }
+
+        LiveDimensionInstantiator.requestEntryWarmup(level);
+    }
+
     private static void syncLifecyclePersistence(MinecraftServer server, boolean conservativeIfUninitialized, String reason) {
         try {
             VerseDimensionCatalog.invalidate(server);
@@ -1337,12 +1774,9 @@ public final class VerseDimensionRuntimeHooks {
 
             Set<ResourceLocation> knownDimensions = VerseDimensionCatalog.knownDimensionIds(server);
             LinkedHashMap<ResourceLocation, VerseDimensionLifecycleSavedData.Entry> snapshot = new LinkedHashMap<>();
-            boolean manifestExists = VerseDimensionLifecycleSavedData.getIfPresent(server)
-                .map(VerseDimensionLifecycleSavedData::isInitialized)
-                .orElse(false);
-            boolean conservativeRestore = conservativeIfUninitialized && !manifestExists;
             LinkedHashMap<ResourceLocation, VerseDimensionParameters> startupDimensions = new LinkedHashMap<>();
             Set<ResourceLocation> playerReferencedDimensions = startupExpectedPlayerDimensionIds(server);
+            List<ResourceLocation> startupPreparedDimensions = selectStartupPreparedDimensions(server);
 
             for (ResourceLocation dimensionId : knownDimensions) {
                 Optional<VerseDimensionParameters> parameters = VerseDimensionCatalog.get(server, dimensionId);
@@ -1356,10 +1790,10 @@ public final class VerseDimensionRuntimeHooks {
 
                 ServerLevel level = server.getLevel(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, dimensionId));
                 boolean loadedAtSave = level != null;
-                boolean pinnedAtSave = loadedAtSave && isDimensionPinned(level);
+                boolean pinnedAtSave = loadedAtSave && isChunkForcedPinned(level);
                 boolean activeAtSave = loadedAtSave && (!level.players().isEmpty() || hasPendingActivity(level));
                 boolean playerReferencedAtSave = playerReferencedDimensions.contains(dimensionId);
-                boolean shouldRestore = playerReferencedAtSave || (loadedAtSave && (!conservativeRestore || pinnedAtSave || activeAtSave));
+                boolean shouldRestore = playerReferencedAtSave || (loadedAtSave && (pinnedAtSave || activeAtSave));
                 String lastState = loadedAtSave
                     ? lifecycleState(level, pinnedAtSave)
                     : (playerReferencedAtSave ? "player_restore_pending" : "unloaded_dormant");
@@ -1370,11 +1804,16 @@ public final class VerseDimensionRuntimeHooks {
                 }
             }
 
+            for (ResourceLocation dimensionId : startupPreparedDimensions) {
+                VerseDimensionCatalog.get(server, dimensionId).ifPresent(parameters -> startupDimensions.put(dimensionId, parameters));
+            }
+
             VerseDimensionLifecycleSavedData.get(server).replaceEntries(snapshot, true);
             GeneratedDimensionPackWriter.syncActiveDimensions(server, startupDimensions);
             if (!startupDimensions.isEmpty()) {
                 ensureActivePackSelected(server);
             }
+            unloadUnselectedStartupPackLevels(server, startupDimensions.keySet(), reason + " active-pack cleanup");
             VerseDimensionCatalog.invalidate(server);
             VerseDimensionCatalog.ensureLoaded(server);
         } catch (RuntimeException exception) {
@@ -1526,6 +1965,7 @@ public final class VerseDimensionRuntimeHooks {
         ENTRY_PREPARATION_TICKETS.remove(levelKey);
         DECORATED_CHUNKS.remove(levelKey);
         PENDING_COMMAND_TELEPORTS.remove(levelKey);
+        PENDING_COMMAND_ENTRIES.remove(levelKey);
         PENDING_HYPER_BOOK_TELEPORTS.remove(levelKey);
         PAUSED_POI_VILLAGERS.remove(levelKey);
         NEXT_METEOR_SHOWER_TICKS.remove(levelKey);
@@ -1534,6 +1974,120 @@ public final class VerseDimensionRuntimeHooks {
         LEGACY_WEATHER_WARNING_DIMENSIONS.remove(levelKey);
         BLOCK_ENTITY_GUARD_WARNING_DIMENSIONS.remove(levelKey);
         LEVEL_DATA_WRAP_WARNING_DIMENSIONS.remove(levelKey);
+    }
+
+    public static void teleportWithVerseEntryAuthorization(Entity entity, ServerLevel destination, Vec3 target, float yRot, float xRot) {
+        AuthorizedVerseEntry authorizedEntry = authorizeVerseEntry(entity, destination);
+        try {
+            entity.teleportTo(destination, target.x(), target.y(), target.z(), Set.<RelativeMovement>of(), yRot, xRot);
+        } finally {
+            clearAuthorizedVerseEntry(entity, authorizedEntry);
+        }
+    }
+
+    private static void unloadUnselectedStartupPackLevels(MinecraftServer server, Set<ResourceLocation> selectedDimensions, String reason) {
+        for (ServerLevel level : new ArrayList<>(server.forgeGetWorldMap().values())) {
+            if (level == null || !isVerseWorksLevel(level) || !level.players().isEmpty()) {
+                continue;
+            }
+
+            ResourceLocation dimensionId = level.dimension().location();
+            if (selectedDimensions.contains(dimensionId)) {
+                continue;
+            }
+
+            if (LiveDimensionInstantiator.isRuntimeLevel(level) && !shouldSleepRuntimeLevel(level)) {
+                continue;
+            }
+
+            if (hasPendingActivity(level) || isChunkForcedPinned(level)) {
+                continue;
+            }
+
+            releaseEntryPreparationTicket(level);
+            pruneIdleRuntimeState(level);
+            try {
+                if (LiveDimensionInstantiator.unload(level, true, true)) {
+                    clearRuntimeLevelState(level.dimension());
+                    VerseWorks.LOGGER.info("VerseWorks unloaded unselected dimension {} during {}", dimensionId, reason);
+                }
+            } catch (Exception exception) {
+                VerseWorks.LOGGER.warn("VerseWorks could not unload unselected dimension {} during {}", dimensionId, reason, exception);
+                LAST_ACTIVE_TICKS.put(level.dimension(), level.getGameTime());
+            }
+        }
+    }
+
+    private static AuthorizedVerseEntry authorizeVerseEntry(Entity entity, ServerLevel destination) {
+        if (!(entity instanceof ServerPlayer player) || !isVerseWorksLevel(destination)) {
+            return null;
+        }
+
+        AuthorizedVerseEntry authorizedEntry = new AuthorizedVerseEntry(destination.dimension());
+        AUTHORIZED_VERSE_ENTRIES.put(player.getUUID(), authorizedEntry);
+        return authorizedEntry;
+    }
+
+    private static void clearAuthorizedVerseEntry(Entity entity, AuthorizedVerseEntry authorizedEntry) {
+        if (authorizedEntry == null || !(entity instanceof ServerPlayer player)) {
+            return;
+        }
+
+        AUTHORIZED_VERSE_ENTRIES.remove(player.getUUID(), authorizedEntry);
+    }
+
+    private static boolean consumeAuthorizedVerseEntry(ServerPlayer player, net.minecraft.resources.ResourceKey<Level> destination) {
+        AuthorizedVerseEntry authorizedEntry = AUTHORIZED_VERSE_ENTRIES.get(player.getUUID());
+        if (authorizedEntry == null || !authorizedEntry.levelKey().equals(destination)) {
+            return false;
+        }
+
+        return AUTHORIZED_VERSE_ENTRIES.remove(player.getUUID(), authorizedEntry);
+    }
+
+    private static Optional<BlockPos> persistentEntryPoint(ServerLevel level) {
+        return VerseDimensionEntryPointSavedData.getIfPresent(level.getServer())
+            .flatMap(data -> data.entryPoint(level.dimension().location()));
+    }
+
+    private static BlockPos resolvePreparedEntryPoint(ServerLevel level, VerseDimensionParameters parameters, ChunkPos entryChunk) {
+        BlockPos cached = PREPARED_ENTRY_POINTS.get(level.dimension());
+        if (cached != null) {
+            return cached.immutable();
+        }
+
+        BlockPos resolved = persistentEntryPoint(level)
+            .map(savedEntryPoint -> restorePreparedEntryPoint(level, parameters, savedEntryPoint))
+            .orElseGet(() -> prepareEntryArrival(level, parameters, entryChunk));
+        rememberPreparedEntryPoint(level, resolved);
+        return resolved;
+    }
+
+    private static BlockPos restorePreparedEntryPoint(ServerLevel level, VerseDimensionParameters parameters, BlockPos savedEntryPoint) {
+        ChunkPos entryChunk = new ChunkPos(savedEntryPoint);
+        ensureChunkAvailable(level, entryChunk.x, entryChunk.z, true);
+        if (isPreparedArrivalSpot(level, parameters, savedEntryPoint)) {
+            clearHeadroom(level, savedEntryPoint, 4);
+            return savedEntryPoint.immutable();
+        }
+
+        if (parameters.worldType().hasBedrockShell()) {
+            return createForcedArrival(level, parameters, entryChunk);
+        }
+
+        return createArrivalPocket(level, savedEntryPoint, parameters);
+    }
+
+    private static void rememberPreparedEntryPoint(ServerLevel level, BlockPos preparedEntryPoint) {
+        BlockPos immutable = preparedEntryPoint.immutable();
+        PREPARED_ENTRY_POINTS.put(level.dimension(), immutable);
+        VerseDimensionEntryPointSavedData.get(level.getServer()).rememberEntryPoint(level.dimension().location(), immutable);
+    }
+
+    private static boolean isStartupPreparationReady(ServerLevel level) {
+        return preparedEntryArrival(level).isPresent()
+            && !hasPendingEntryPreparation(level)
+            && LiveDimensionInstantiator.isReadyForEntry(level);
     }
 
     private static void releaseWarmupTicket(ServerLevel level, ChunkPos chunkPos, int radius) {
@@ -1578,16 +2132,22 @@ public final class VerseDimensionRuntimeHooks {
         }
     }
 
-    private record PendingPlayerEntry(net.minecraft.resources.ResourceKey<Level> levelKey, Vec3 arrival, float yRot, float xRot) {
+    private record PendingPlayerEntry(net.minecraft.resources.ResourceKey<Level> levelKey, Vec3 arrival, float yRot, float xRot, boolean recordVisitOnArrival) {
+    }
+
+    private record AuthorizedVerseEntry(net.minecraft.resources.ResourceKey<Level> levelKey) {
     }
 
     private static void quiesceShutdownWork(MinecraftServer server) {
         VerseChunkWarmup.releaseAll(server);
+        AUTHORIZED_VERSE_ENTRIES.clear();
         PENDING_PLAYER_ENTRIES.clear();
         PENDING_COMMAND_TELEPORTS.clear();
         PENDING_HYPER_BOOK_TELEPORTS.clear();
         PENDING_SPAWN_PREPARATIONS.clear();
         ENTRY_PREPARATION_TICKETS.clear();
+        STARTUP_PREPARATION_QUEUE.clear();
+        activeStartupPreparation = null;
     }
 
     private static void logShutdownState(MinecraftServer server) {
@@ -1617,10 +2177,19 @@ public final class VerseDimensionRuntimeHooks {
         return VerseDimensionCatalog.get(level.getServer(), dimensionId);
     }
 
+    private static boolean isCorruptionRuleEnabled(VerseDimensionParameters parameters, VerseDimensionCorruption corruption) {
+        if (!parameters.corruptions().contains(corruption)) {
+            return true;
+        }
+
+        return Config.isCorruptionEffectEnabled(corruption);
+    }
+
     private static void applyTimeRules(ServerLevel level, VerseDimensionParameters parameters) {
-        if (parameters.permanentTime()) {
+        if (parameters.effectivePermanentTime()
+            && (parameters.forcesPermanentNight() || isCorruptionRuleEnabled(parameters, VerseDimensionCorruption.FIXED_TIME))) {
             long currentDay = Math.floorDiv(level.getDayTime(), 24000L);
-            long lockedTime = currentDay * 24000L + parameters.resolvedTimeOfDay();
+            long lockedTime = currentDay * 24000L + parameters.effectiveResolvedTimeOfDay();
             if (level.getDayTime() != lockedTime) {
                 level.setDayTime(lockedTime);
             }
@@ -1649,8 +2218,12 @@ public final class VerseDimensionRuntimeHooks {
     }
 
     private static void applyWeatherRules(ServerLevel level, VerseDimensionParameters parameters) {
-        boolean targetRain = parameters.targetRain();
-        boolean targetThunder = parameters.targetThunder();
+        boolean targetRain = parameters.permanentStorm()
+            ? isCorruptionRuleEnabled(parameters, VerseDimensionCorruption.ENDLESS_STORM)
+            : parameters.permanentRain() && isCorruptionRuleEnabled(parameters, VerseDimensionCorruption.ENDLESS_RAIN);
+        boolean targetThunder = parameters.permanentStorm()
+            ? isCorruptionRuleEnabled(parameters, VerseDimensionCorruption.ENDLESS_STORM)
+            : parameters.permanentLightning() && isCorruptionRuleEnabled(parameters, VerseDimensionCorruption.ENDLESS_LIGHTNING);
         if (!targetRain && !targetThunder) {
             return;
         }
@@ -1670,7 +2243,9 @@ public final class VerseDimensionRuntimeHooks {
     }
 
     private static void applyLightningHazards(ServerLevel level, VerseDimensionParameters parameters) {
-        if ((!parameters.permanentLightning() && !parameters.permanentStorm()) || level.players().isEmpty()) {
+        boolean lightningEnabled = (parameters.permanentLightning() && isCorruptionRuleEnabled(parameters, VerseDimensionCorruption.ENDLESS_LIGHTNING))
+            || (parameters.permanentStorm() && isCorruptionRuleEnabled(parameters, VerseDimensionCorruption.ENDLESS_STORM));
+        if (!lightningEnabled || level.players().isEmpty()) {
             return;
         }
 
@@ -1737,7 +2312,7 @@ public final class VerseDimensionRuntimeHooks {
     }
 
     private static void applyMeteorShowers(ServerLevel level, VerseDimensionParameters parameters) {
-        if (!parameters.meteorShowers() || level.players().isEmpty()) {
+        if (!parameters.meteorShowers() || !isCorruptionRuleEnabled(parameters, VerseDimensionCorruption.METEORS) || level.players().isEmpty()) {
             return;
         }
 
@@ -1779,7 +2354,7 @@ public final class VerseDimensionRuntimeHooks {
     }
 
     private static void applyWarpSpawns(ServerLevel level, VerseDimensionParameters parameters) {
-        if (!parameters.spawnWarp() || level.players().isEmpty()) {
+        if (!parameters.spawnWarp() || !isCorruptionRuleEnabled(parameters, VerseDimensionCorruption.WARP) || level.players().isEmpty()) {
             return;
         }
 
@@ -1883,7 +2458,7 @@ public final class VerseDimensionRuntimeHooks {
     }
 
     private static void applyGravity(ServerPlayer player, VerseDimensionParameters parameters) {
-        if (Math.abs(parameters.gravityScale() - 1.0D) < 0.00001D) {
+        if (Math.abs(parameters.gravityScale() - 1.0D) < 0.00001D || !isCorruptionRuleEnabled(parameters, VerseDimensionCorruption.GRAVITY)) {
             return;
         }
 
@@ -1935,7 +2510,7 @@ public final class VerseDimensionRuntimeHooks {
         VerseWorks.LOGGER.info("Preparing VerseWorks spawn region for {} with {}", level.dimension().location(), parameters.rulesSummary());
         PENDING_DECORATION_JOBS.remove(level.dimension());
 
-        PREPARED_ENTRY_POINTS.put(level.dimension(), prepareEntryArrival(level, parameters, entryChunk));
+        rememberPreparedEntryPoint(level, resolvePreparedEntryPoint(level, parameters, entryChunk));
 
         Deque<DecorationJob> jobs = new ArrayDeque<>();
         queueChunkDecorations(server, level, parameters, entryChunk, jobs);
@@ -1963,7 +2538,7 @@ public final class VerseDimensionRuntimeHooks {
         if (pending.warmupFuture().isCompletedExceptionally()) {
             if (PENDING_SPAWN_PREPARATIONS.remove(level.dimension(), pending)) {
                 VerseWorks.LOGGER.warn("VerseWorks entry preparation warmup failed for {}; falling back to loaded entry area only", level.dimension().location());
-                PREPARED_ENTRY_POINTS.put(level.dimension(), prepareEntryArrival(level, pending.parameters(), pending.entryChunk()));
+                rememberPreparedEntryPoint(level, resolvePreparedEntryPoint(level, pending.parameters(), pending.entryChunk()));
                 releaseEntryPreparationTicket(level);
             }
             return;
@@ -2005,7 +2580,7 @@ public final class VerseDimensionRuntimeHooks {
         }
 
         PENDING_DECORATION_JOBS.remove(level.dimension());
-        resolveParameters(level).ifPresent(parameters -> PREPARED_ENTRY_POINTS.put(level.dimension(), prepareEntryArrival(level, parameters, LiveDimensionInstantiator.getEntryChunk(level))));
+        resolveParameters(level).ifPresent(parameters -> rememberPreparedEntryPoint(level, resolvePreparedEntryPoint(level, parameters, LiveDimensionInstantiator.getEntryChunk(level))));
         releaseEntryPreparationTicket(level);
         VerseWorks.LOGGER.info("Finished VerseWorks queued decoration batch for {}", level.dimension().location());
     }
@@ -2029,15 +2604,19 @@ public final class VerseDimensionRuntimeHooks {
         ChunkDecorationState decorationState = DECORATED_CHUNKS.computeIfAbsent(level.dimension(), ignored -> new ChunkDecorationState());
         long chunkKey = chunkPos.toLong();
 
-        if (parameters.oceanLevel() != null && decorationState.oceanChunks().add(chunkKey)) {
-            jobs.addLast(new OceanFillJob(parameters, parameters.oceanLevel(), chunkPos));
+        if (parameters.effectiveOceanLevel() != null && decorationState.oceanChunks().add(chunkKey)) {
+            jobs.addLast(new OceanFillJob(parameters, parameters.effectiveOceanLevel(), chunkPos));
         }
 
-        if (parameters.lakes() && decorationState.lakeChunks().add(chunkKey)) {
+        if (!parameters.poolFeatures().isEmpty() && decorationState.lakeChunks().add(chunkKey)) {
             jobs.addAll(createLakeJobs(server, level, parameters, chunkPos));
         }
 
-        if (parameters.oreMultiplier() > 1.0D && !parameters.worldType().isFlat() && decorationState.oreChunks().add(chunkKey)) {
+        if (!parameters.shapeFeatures().isEmpty() && decorationState.sphereChunks().add(chunkKey)) {
+            jobs.addAll(createSphereJobs(server, level, parameters, chunkPos));
+        }
+
+        if (!parameters.oreMorphFeatures().isEmpty() && !parameters.worldType().isFlat() && decorationState.oreChunks().add(chunkKey)) {
             jobs.addLast(new OrePlacementJob(server, level, parameters, chunkPos));
         }
     }
@@ -2282,22 +2861,26 @@ public final class VerseDimensionRuntimeHooks {
     }
 
     private static boolean shouldPreferNaturalSpawn(VerseDimensionParameters parameters) {
-        return !parameters.worldType().isVoid() && parameters.oceanLevel() == null;
+        return parameters.allowsNaturalSpawnSearch();
     }
 
     private static BlockPos prepareEntryArrival(ServerLevel level, VerseDimensionParameters parameters, ChunkPos entryChunk) {
-        BlockPos safeSpot = findExistingSafeSpot(level, entryChunk);
-        if (safeSpot != null) {
-            return safeSpot.immutable();
-        }
-
         if (shouldPreferNaturalSpawn(parameters)) {
+            BlockPos safeSpot = findExistingSafeSpot(level, entryChunk);
+            if (safeSpot != null) {
+                return finalizePreparedArrival(level, safeSpot, parameters, false);
+            }
+
             BlockPos nearbySafeSpot = findNearbyChunkSafeSpot(level, entryChunk, naturalSpawnSearchRadius(parameters), false);
             if (nearbySafeSpot != null) {
-                return nearbySafeSpot.immutable();
+                return finalizePreparedArrival(level, nearbySafeSpot, parameters, false);
             }
         }
 
+        return createForcedArrival(level, parameters, entryChunk);
+    }
+
+    private static BlockPos createForcedArrival(ServerLevel level, VerseDimensionParameters parameters, ChunkPos entryChunk) {
         int minBuildHeight = level.dimensionType().minY();
         int anchorY = determinePlatformY(level, parameters, entryChunk);
         if (anchorY < minBuildHeight + 4) {
@@ -2305,9 +2888,37 @@ public final class VerseDimensionRuntimeHooks {
         }
 
         BlockPos center = new BlockPos(entryChunk.getMiddleBlockX(), anchorY, entryChunk.getMiddleBlockZ());
-        ensurePlatform(level, center.below(), platformBlock(parameters), platformRadius(parameters));
-        clearHeadroom(level, center, 3);
-        return center.immutable();
+        return finalizePreparedArrival(level, center, parameters, true);
+    }
+
+    private static BlockPos finalizePreparedArrival(ServerLevel level, BlockPos center, VerseDimensionParameters parameters, boolean forcePocket) {
+        BlockPos candidate = center.immutable();
+        if (!forcePocket && isPreparedArrivalSpot(level, parameters, candidate)) {
+            clearHeadroom(level, candidate, 4);
+            return candidate;
+        }
+
+        return createArrivalPocket(level, candidate, parameters);
+    }
+
+    private static BlockPos createArrivalPocket(ServerLevel level, BlockPos center, VerseDimensionParameters parameters) {
+        int minBuildHeight = level.dimensionType().minY();
+        int maxBuildHeight = minBuildHeight + level.dimensionType().height() - 1;
+        int[] yOffsets = {0, 6, -6, 12, -12};
+        for (int yOffset : yOffsets) {
+            int candidateY = Mth.clamp(center.getY() + yOffset, minBuildHeight + 8, maxBuildHeight - 8);
+            BlockPos candidate = new BlockPos(center.getX(), candidateY, center.getZ());
+            ensurePlatform(level, candidate.below(), platformBlock(parameters), platformRadius(parameters));
+            clearHeadroom(level, candidate, 4);
+            if (isSafeStandingSpot(level, candidate)) {
+                return candidate.immutable();
+            }
+        }
+
+        BlockPos emergency = new BlockPos(center.getX(), Mth.clamp(center.getY(), minBuildHeight + 8, maxBuildHeight - 8), center.getZ());
+        ensurePlatform(level, emergency.below(), DEFAULT_SAFETY_PLATFORM_BLOCK, DEFAULT_SAFETY_PLATFORM_RADIUS + 1);
+        clearHeadroom(level, emergency, 5);
+        return emergency.immutable();
     }
 
     private static int naturalSpawnSearchRadius(VerseDimensionParameters parameters) {
@@ -2327,8 +2938,21 @@ public final class VerseDimensionRuntimeHooks {
 
     private static int determinePlatformY(ServerLevel level, VerseDimensionParameters parameters, ChunkPos entryChunk) {
         int minBuildHeight = level.dimensionType().minY();
-        if (parameters.oceanLevel() != null) {
-            return Math.max(parameters.oceanLevel() + 2, minBuildHeight + 8);
+        int maxBuildHeight = minBuildHeight + level.dimensionType().height() - 1;
+        if (parameters.worldType() == VerseDimensionWorldType.BEDROCK_SHELL) {
+            return Mth.clamp(maxBuildHeight - 26, minBuildHeight + 12, maxBuildHeight - 16);
+        }
+
+        if (parameters.worldType().hasCeiling()) {
+            return Mth.clamp(minBuildHeight + 96, minBuildHeight + 8, maxBuildHeight - 24);
+        }
+
+        Integer oceanLevel = parameters.effectiveOceanLevel();
+        if (oceanLevel != null) {
+            return Math.max(oceanLevel + 2, minBuildHeight + 8);
+        }
+        if (parameters.worldType().isFluidWorld()) {
+            return Math.max(minBuildHeight + 8, 96);
         }
 
         BlockPos anchor = new BlockPos(entryChunk.getMiddleBlockX(), 0, entryChunk.getMiddleBlockZ());
@@ -2355,6 +2979,10 @@ public final class VerseDimensionRuntimeHooks {
 
     private static CompletableFuture<?> warmChunks(ServerLevel level, ChunkPos centerChunk, int radius) {
         return VerseChunkWarmup.request(level, centerChunk, radius);
+    }
+
+    private static CompletableFuture<?> loadChunks(ServerLevel level, ChunkPos centerChunk, int radius) {
+        return VerseChunkWarmup.requestLoaded(level, centerChunk, radius);
     }
 
     private static void logSlowEntryPreparation(ServerLevel level, long startedAtNanos, String action) {
@@ -2394,6 +3022,31 @@ public final class VerseDimensionRuntimeHooks {
             && headState.isAir();
     }
 
+    private static boolean isPreparedArrivalSpot(ServerLevel level, VerseDimensionParameters parameters, BlockPos standPos) {
+        if (!isSafeStandingSpot(level, standPos)) {
+            return false;
+        }
+
+        if (!parameters.worldType().hasBedrockShell()) {
+            return true;
+        }
+
+        return hasBedrockRoofAbove(level, standPos, 40);
+    }
+
+    private static boolean hasBedrockRoofAbove(ServerLevel level, BlockPos standPos, int maxDistance) {
+        int maxY = level.dimensionType().minY() + level.dimensionType().height() - 1;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int upperBound = Math.min(maxY, standPos.getY() + maxDistance);
+        for (int y = standPos.getY() + 2; y <= upperBound; y++) {
+            cursor.set(standPos.getX(), y, standPos.getZ());
+            if (level.getBlockState(cursor).is(Blocks.BEDROCK)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean isChunkLoaded(ServerLevel level, BlockPos pos) {
         ChunkPos chunkPos = new ChunkPos(pos);
         return level.getChunkSource().getChunkNow(chunkPos.x, chunkPos.z) != null;
@@ -2409,7 +3062,7 @@ public final class VerseDimensionRuntimeHooks {
     }
 
     private static Block platformBlock(VerseDimensionParameters parameters) {
-        if (parameters.worldType().isVoid() || parameters.oceanLevel() != null) {
+        if (parameters.requiresSafetyPlatformSpawn()) {
             return DEFAULT_SAFETY_PLATFORM_BLOCK;
         }
 
@@ -2417,7 +3070,7 @@ public final class VerseDimensionRuntimeHooks {
     }
 
     private static int platformRadius(VerseDimensionParameters parameters) {
-        if (parameters.worldType().isVoid() || parameters.oceanLevel() != null) {
+        if (parameters.requiresSafetyPlatformSpawn()) {
             return DEFAULT_SAFETY_PLATFORM_RADIUS;
         }
 
@@ -2441,31 +3094,26 @@ public final class VerseDimensionRuntimeHooks {
     }
 
     private static List<DecorationJob> createLakeJobs(MinecraftServer server, ServerLevel level, VerseDimensionParameters parameters, ChunkPos chunkPos) {
-        RandomSource random = chunkRandom(server, level, chunkPos, 0x4C414B45L);
-        int lakeCount = random.nextDouble() < 0.35D ? 1 : 0;
-        if (parameters.oreMultiplier() >= 7.5D && random.nextDouble() < 0.15D) {
-            lakeCount++;
-        }
-        if (lakeCount == 0) {
-            return List.of();
-        }
-
-        List<DecorationJob> jobs = new ArrayList<>(lakeCount);
+        List<DecorationJob> jobs = new ArrayList<>();
         int minY = level.dimensionType().minY() + 4;
-        for (int index = 0; index < lakeCount; index++) {
-            int x = (chunkPos.x << 4) + 3 + random.nextInt(10);
-            int z = (chunkPos.z << 4) + 3 + random.nextInt(10);
-            BlockPos surface = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z));
-            if (surface.getY() <= minY + 3) {
-                continue;
-            }
+        for (VerseDimensionParameters.PoolFeatureSpec poolSpec : parameters.poolFeatures()) {
+            RandomSource random = chunkRandom(server, level, chunkPos, 0x4C414B45L ^ poolSpec.fluidId().hashCode());
+            int lakeCount = random.nextDouble() < poolSpec.chancePerChunk() ? 1 : 0;
+            for (int index = 0; index < lakeCount; index++) {
+                int x = (chunkPos.x << 4) + 3 + random.nextInt(10);
+                int z = (chunkPos.z << 4) + 3 + random.nextInt(10);
+                BlockPos surface = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z));
+                if (surface.getY() <= minY + 3) {
+                    continue;
+                }
 
-            int basinY = Math.max(minY, surface.getY() - 2 - random.nextInt(3));
-            if (!isTerrainPuddleSite(level, new BlockPos(x, basinY, z))) {
-                continue;
-            }
+                int basinY = Math.max(minY, surface.getY());
+                if (!isTerrainPuddleSite(level, new BlockPos(x, basinY, z))) {
+                    continue;
+                }
 
-            jobs.add(new LakePlacementJob(parameters, new BlockPos(x, basinY, z)));
+                jobs.add(new LakePlacementJob(resolveFluid(parameters, poolSpec.fluidId()).defaultFluidState().createLegacyBlock(), new BlockPos(x, basinY, z), poolSpec.radius(), poolSpec.depth()));
+            }
         }
         return jobs;
     }
@@ -2491,27 +3139,35 @@ public final class VerseDimensionRuntimeHooks {
     }
 
     private static List<DecorationJob> createSphereJobs(MinecraftServer server, ServerLevel level, VerseDimensionParameters parameters, ChunkPos chunkPos) {
-        RandomSource random = chunkRandom(server, level, chunkPos, 0x53504845L);
-        int sphereCount = random.nextDouble() < 0.28D ? 1 : 0;
-        if (parameters.worldType() == VerseDimensionWorldType.SKY_ISLAND && random.nextDouble() < 0.35D) {
-            sphereCount++;
-        }
-        if (sphereCount == 0) {
-            return List.of();
-        }
-
-        List<int[]> spheres = new ArrayList<>(sphereCount);
-        for (int index = 0; index < sphereCount; index++) {
-            int x = (chunkPos.x << 4) + random.nextInt(16);
-            int z = (chunkPos.z << 4) + random.nextInt(16);
-            int y = 96 + random.nextInt(96);
-            if (parameters.worldType().isVoid()) {
-                y += 24;
+        List<DecorationJob> jobs = new ArrayList<>();
+        for (VerseDimensionParameters.ShapeFeatureSpec shapeSpec : parameters.shapeFeatures()) {
+            RandomSource random = chunkRandom(server, level, chunkPos, 0x53504845L ^ shapeSpec.shape().serializedName().hashCode() ^ BuiltInRegistries.BLOCK.getKey(shapeSpec.block()).hashCode());
+            int sphereCount = random.nextDouble() < shapeSpec.chancePerChunk() ? 1 : 0;
+            if (parameters.worldType() == VerseDimensionWorldType.SKY_ISLAND && random.nextDouble() < 0.35D) {
+                sphereCount++;
             }
-            int radius = 3 + random.nextInt(5);
-            spheres.add(new int[]{x, y, z, radius});
+            if (sphereCount == 0) {
+                continue;
+            }
+
+            List<int[]> spheres = new ArrayList<>(sphereCount);
+            for (int index = 0; index < sphereCount; index++) {
+                int x = (chunkPos.x << 4) + random.nextInt(16);
+                int z = (chunkPos.z << 4) + random.nextInt(16);
+                int y = parameters.sampleHeight(random, shapeSpec.heightDistribution(), level.dimensionType().minY(), level.dimensionType().minY() + level.dimensionType().height());
+                if ("surface".equals(shapeSpec.heightDistribution().profile())) {
+                    int surfaceY = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z)).getY() - 1;
+                    y = Math.max(level.dimensionType().minY() + 8, surfaceY + Math.max(2, shapeSpec.maxRadius() / 2));
+                    if (shapeSpec.shape() == VerseDimensionParameters.ShapeKind.CUBE && random.nextDouble() < 0.28D) {
+                        y = Math.min(level.dimensionType().minY() + level.dimensionType().height() - shapeSpec.maxRadius() - 4, y + 14 + random.nextInt(28));
+                    }
+                }
+                int radius = shapeSpec.minRadius() + random.nextInt(Math.max(1, shapeSpec.maxRadius() - shapeSpec.minRadius() + 1));
+                spheres.add(new int[]{x, y, z, radius});
+            }
+            jobs.add(new SpherePlacementJob(shapeSpec, spheres));
         }
-        return List.of(new SpherePlacementJob(parameters, spheres));
+        return jobs;
     }
 
     private static RandomSource chunkRandom(MinecraftServer server, ServerLevel level, ChunkPos chunkPos, long salt) {
@@ -2525,68 +3181,16 @@ public final class VerseDimensionRuntimeHooks {
         return RandomSource.create(mixedSeed);
     }
 
-    private static BlockState pickOre(RandomSource random, int y, double oreMultiplier) {
-        if (oreMultiplier >= 7.5D) {
-            Block[] jackpotOres = {
-                Blocks.DEEPSLATE_DIAMOND_ORE,
-                Blocks.DEEPSLATE_EMERALD_ORE,
-                Blocks.DEEPSLATE_GOLD_ORE,
-                Blocks.DEEPSLATE_REDSTONE_ORE,
-                Blocks.DEEPSLATE_LAPIS_ORE,
-                Blocks.DIAMOND_ORE,
-                Blocks.EMERALD_ORE,
-                Blocks.GOLD_ORE,
-                Blocks.REDSTONE_ORE,
-                Blocks.LAPIS_ORE,
-                Blocks.IRON_ORE,
-                Blocks.COPPER_ORE
-            };
-            return jackpotOres[random.nextInt(jackpotOres.length)].defaultBlockState();
-        }
-
-        if (y < -24) {
-            return random.nextBoolean() ? Blocks.DEEPSLATE_DIAMOND_ORE.defaultBlockState() : Blocks.DEEPSLATE_REDSTONE_ORE.defaultBlockState();
-        }
-        if (y < 16) {
-            Block[] ores = {Blocks.DEEPSLATE_IRON_ORE, Blocks.DEEPSLATE_GOLD_ORE, Blocks.DEEPSLATE_LAPIS_ORE, Blocks.DEEPSLATE_REDSTONE_ORE};
-            return ores[random.nextInt(ores.length)].defaultBlockState();
-        }
-        if (y < 64) {
-            Block[] ores = {Blocks.IRON_ORE, Blocks.COPPER_ORE, Blocks.COAL_ORE, Blocks.GOLD_ORE};
-            return ores[random.nextInt(ores.length)].defaultBlockState();
-        }
-        return Blocks.COAL_ORE.defaultBlockState();
-    }
-
-    private static int oreClusterSize(RandomSource random, double oreMultiplier) {
-        if (oreMultiplier >= 7.5D) {
-            return 0;
-        }
-
-        int baseSize = 4 + random.nextInt(5);
-        int bonus = Math.max(0, (int) Math.round((oreMultiplier - 1.0D) * 2.5D));
-        return baseSize + bonus;
-    }
-
-    private static int oreVeinsPerChunk(double oreMultiplier) {
-        if (oreMultiplier <= 1.0D) {
-            return 0;
-        }
-
-        double normalized = oreMultiplier - 1.0D;
-        int veins = 8 + (int) Math.round(normalized * normalized * 4.5D);
-        if (oreMultiplier >= 7.5D) {
-            veins += 96;
-        }
-        return veins;
-    }
-
     private static void placeQueuedBlock(ServerLevel level, BlockPos position, BlockState state) {
         level.setBlock(position, state, 2);
     }
 
     private static Fluid resolveFluid(VerseDimensionParameters parameters) {
         ResourceLocation fluidId = parameters.effectiveFluidId();
+        return resolveFluid(parameters, fluidId);
+    }
+
+    private static Fluid resolveFluid(VerseDimensionParameters parameters, ResourceLocation fluidId) {
         if (fluidId == null) {
             return BuiltInRegistries.FLUID.getOptional(ResourceLocation.withDefaultNamespace("water")).orElse(net.minecraft.world.level.material.Fluids.WATER);
         }
@@ -2734,11 +3338,11 @@ public final class VerseDimensionRuntimeHooks {
         private BlockPos currentSurface;
         private boolean done;
 
-        private LakePlacementJob(VerseDimensionParameters parameters, BlockPos center) {
-            this.fluidState = resolveFluid(parameters).defaultFluidState().createLegacyBlock();
+        private LakePlacementJob(BlockState fluidState, BlockPos center, int radius, int depth) {
+            this.fluidState = fluidState;
             this.center = center.immutable();
-            this.radius = 8;
-            this.depth = 4;
+            this.radius = radius;
+            this.depth = depth;
             this.dx = -this.radius;
             this.dz = -this.radius;
         }
@@ -2760,7 +3364,7 @@ public final class VerseDimensionRuntimeHooks {
 
                         double distance = Math.sqrt(this.dx * this.dx + this.dz * this.dz);
                         if (distance <= this.radius) {
-                            this.currentColumnDepth = Math.max(1, this.depth - (int) Math.floor(distance / 2.0D));
+                            this.currentColumnDepth = Math.max(1, this.depth - (int) Math.floor(distance / 2.5D));
                             this.currentSurface = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, this.center.offset(this.dx, 0, this.dz));
                             this.offset = 0;
                             this.phase = 0;
@@ -2822,16 +3426,20 @@ public final class VerseDimensionRuntimeHooks {
         private final List<int[]> sphereDefinitions;
         private final BlockState shellState;
         private final BlockState interiorState;
+        private final VerseDimensionParameters.ShapeKind shapeKind;
+        private final boolean hollow;
         private int sphereIndex;
         private int dx;
         private int dy;
         private int dz;
         private boolean initialized;
 
-        private SpherePlacementJob(VerseDimensionParameters parameters, List<int[]> sphereDefinitions) {
+        private SpherePlacementJob(VerseDimensionParameters.ShapeFeatureSpec shapeSpec, List<int[]> sphereDefinitions) {
             this.sphereDefinitions = List.copyOf(sphereDefinitions);
-            this.shellState = parameters.effectiveSphereBlock().defaultBlockState();
-            this.interiorState = Blocks.AIR.defaultBlockState();
+            this.shellState = shapeSpec.block().defaultBlockState();
+            this.interiorState = shapeSpec.block().defaultBlockState();
+            this.shapeKind = shapeSpec.shape();
+            this.hollow = shapeSpec.hollow();
         }
 
         @Override
@@ -2852,9 +3460,17 @@ public final class VerseDimensionRuntimeHooks {
 
                 while (budget > 0 && this.dx <= radius) {
                     int distanceSquared = this.dx * this.dx + this.dy * this.dy + this.dz * this.dz;
-                    if (distanceSquared <= radiusSquared) {
+                    boolean inside = this.shapeKind == VerseDimensionParameters.ShapeKind.CUBE
+                        ? Math.abs(this.dx) <= radius && Math.abs(this.dy) <= radius && Math.abs(this.dz) <= radius
+                        : distanceSquared <= radiusSquared;
+                    if (inside) {
                         BlockPos position = center.offset(this.dx, this.dy, this.dz);
-                        placeQueuedBlock(level, position, distanceSquared >= innerRadiusSquared ? this.shellState : this.interiorState);
+                        boolean shell = this.shapeKind == VerseDimensionParameters.ShapeKind.CUBE
+                            ? Math.abs(this.dx) == radius || Math.abs(this.dy) == radius || Math.abs(this.dz) == radius
+                            : distanceSquared >= innerRadiusSquared;
+                        if (!this.hollow || shell) {
+                            placeQueuedBlock(level, position, shell ? this.shellState : this.interiorState);
+                        }
                         budget--;
                     }
 
@@ -2898,7 +3514,7 @@ public final class VerseDimensionRuntimeHooks {
         BlockPos.MutableBlockPos cursor = origin.mutable();
         for (int index = 0; index < size; index++) {
             BlockState existingState = level.getBlockState(cursor);
-            if (existingState.is(BlockTags.STONE_ORE_REPLACEABLES) || existingState.is(BlockTags.DEEPSLATE_ORE_REPLACEABLES)) {
+            if (VerseOreProfiles.canReplace(existingState)) {
                 placeQueuedBlock(level, cursor, oreState);
             }
 
@@ -2908,27 +3524,18 @@ public final class VerseDimensionRuntimeHooks {
 
     private static final class OrePlacementJob implements DecorationJob {
         private final ChunkPos chunkPos;
-        private final double oreMultiplier;
-        private final int totalVeins;
         private final RandomSource random;
         private final int minBuildHeight;
-        private final boolean saturatedMode;
-        private final int maxOreY;
-        private int scanX;
-        private int scanZ;
-        private int scanY;
-        private int completedVeins;
+        private final List<VerseDimensionParameters.OreMorphSpec> oreSpecs;
+        private int currentSpecIndex;
+        private int completedVeinsForSpec;
         private boolean started;
 
         private OrePlacementJob(MinecraftServer server, ServerLevel level, VerseDimensionParameters parameters, ChunkPos chunkPos) {
             this.chunkPos = chunkPos;
-            this.oreMultiplier = parameters.oreMultiplier();
-            this.saturatedMode = this.oreMultiplier >= 7.5D;
-            this.totalVeins = oreVeinsPerChunk(parameters.oreMultiplier());
+            this.oreSpecs = List.copyOf(parameters.oreMorphFeatures());
             this.random = chunkRandom(server, level, chunkPos, 0x4F524553L);
             this.minBuildHeight = level.dimensionType().minY();
-            this.maxOreY = Math.min(level.dimensionType().minY() + 144, level.dimensionType().minY() + level.dimensionType().height() - 16);
-            this.scanY = this.minBuildHeight + 4;
         }
 
         @Override
@@ -2936,56 +3543,41 @@ public final class VerseDimensionRuntimeHooks {
             if (!this.started) {
                 this.started = true;
                 VerseWorks.LOGGER.info(
-                    "Starting ore enrichment for {} chunk {},{} with {} at multiplier {}",
+                    "Starting ore enrichment for {} chunk {},{} with {} profile rules",
                     level.dimension().location(),
                     this.chunkPos.x,
                     this.chunkPos.z,
-                    this.saturatedMode ? "chunk saturation" : this.totalVeins + " extra veins",
-                    this.oreMultiplier
+                    this.oreSpecs.size()
                 );
             }
 
-            if (this.saturatedMode) {
-                runSaturated(level, budget);
-                return;
-            }
+            while (budget > 0 && this.currentSpecIndex < this.oreSpecs.size()) {
+                VerseDimensionParameters.OreMorphSpec oreSpec = this.oreSpecs.get(this.currentSpecIndex);
+                int totalVeins = VerseOreProfiles.veinsPerChunk(oreSpec.profile(), oreSpec.multiplier());
+                if (this.completedVeinsForSpec >= totalVeins) {
+                    this.currentSpecIndex++;
+                    this.completedVeinsForSpec = 0;
+                    continue;
+                }
 
-            while (budget > 0 && this.completedVeins < this.totalVeins) {
                 int x = (this.chunkPos.x << 4) + this.random.nextInt(16);
-                int y = sampleOreY(this.random, this.minBuildHeight);
+                int y = VerseOreProfiles.sampleY(oreSpec.profile(), this.random, this.minBuildHeight);
                 int z = (this.chunkPos.z << 4) + this.random.nextInt(16);
-                placeOreCluster(level, new BlockPos(x, y, z), pickOre(this.random, y, this.oreMultiplier), oreClusterSize(this.random, this.oreMultiplier), this.random);
-                this.completedVeins++;
-                budget--;
-            }
-        }
-
-        private void runSaturated(ServerLevel level, int budget) {
-            float chance = 0.58F;
-            while (budget > 0 && this.scanY <= this.maxOreY) {
-                BlockPos position = new BlockPos((this.chunkPos.x << 4) + this.scanX, this.scanY, (this.chunkPos.z << 4) + this.scanZ);
-                BlockState existingState = level.getBlockState(position);
-                if ((existingState.is(BlockTags.STONE_ORE_REPLACEABLES) || existingState.is(BlockTags.DEEPSLATE_ORE_REPLACEABLES))
-                    && this.random.nextFloat() < chance) {
-                    placeQueuedBlock(level, position, pickOre(this.random, this.scanY, this.oreMultiplier));
+                BlockPos anchor = findOreAnchor(level, x, y, z);
+                if (anchor == null) {
+                    this.completedVeinsForSpec++;
+                    budget--;
+                    continue;
                 }
-
+                placeOreCluster(level, anchor, oreSpec.replacementBlock().defaultBlockState(), VerseOreProfiles.clusterSize(oreSpec.profile(), this.random, oreSpec.multiplier()), this.random);
+                this.completedVeinsForSpec++;
                 budget--;
-                this.scanX++;
-                if (this.scanX >= 16) {
-                    this.scanX = 0;
-                    this.scanZ++;
-                    if (this.scanZ >= 16) {
-                        this.scanZ = 0;
-                        this.scanY++;
-                    }
-                }
             }
         }
 
         @Override
         public boolean isDone() {
-            return this.saturatedMode ? this.scanY > this.maxOreY : this.completedVeins >= this.totalVeins;
+            return this.currentSpecIndex >= this.oreSpecs.size();
         }
 
         @Override
@@ -2995,8 +3587,33 @@ public final class VerseDimensionRuntimeHooks {
 
         @Override
         public int budgetPerTick() {
-            return this.saturatedMode ? 768 : 10;
+            return 10;
         }
+    }
+
+    private static BlockPos findOreAnchor(ServerLevel level, int x, int sampledY, int z) {
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int minY = level.dimensionType().minY();
+        int maxY = minY + level.dimensionType().height() - 1;
+        int surfaceY = level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z)).getY() - 1;
+        int startY = Mth.clamp(sampledY, minY + 4, Math.min(surfaceY, maxY - 4));
+        for (int delta = 0; delta <= 32; delta++) {
+            int downY = startY - delta;
+            if (downY >= minY) {
+                cursor.set(x, downY, z);
+                if (VerseOreProfiles.canReplace(level.getBlockState(cursor))) {
+                    return cursor.immutable();
+                }
+            }
+            int upY = startY + delta;
+            if (delta > 0 && upY <= maxY) {
+                cursor.set(x, upY, z);
+                if (VerseOreProfiles.canReplace(level.getBlockState(cursor))) {
+                    return cursor.immutable();
+                }
+            }
+        }
+        return null;
     }
 
     private record ChunkDecorationState(Set<Long> oceanChunks, Set<Long> lakeChunks, Set<Long> sphereChunks, Set<Long> oreChunks) {
@@ -3033,12 +3650,38 @@ public final class VerseDimensionRuntimeHooks {
     ) {
     }
 
+    private record PendingCommandEntry(
+        Entity entity,
+        long queuedAtGameTime
+    ) {
+    }
+
     private record PendingHyperBookTeleport(
         ServerPlayer player,
         ChunkPos targetChunk,
         java.util.concurrent.CompletableFuture<?> warmupFuture,
-        long queuedAtGameTime
+        long queuedAtGameTime,
+        long readyAtGameTime,
+        boolean notified,
+        boolean notifyWhenReady
     ) {
+        private PendingHyperBookTeleport markNotified(long gameTime) {
+            return new PendingHyperBookTeleport(player, targetChunk, warmupFuture, queuedAtGameTime, gameTime, true, notifyWhenReady);
+        }
+    }
+
+    private record StartupPreparedDimension(
+        ResourceLocation dimensionId,
+        VerseDimensionParameters parameters,
+        CompletableFuture<LiveDimensionInstantiator.Result> activationFuture
+    ) {
+        private StartupPreparedDimension(ResourceLocation dimensionId, VerseDimensionParameters parameters) {
+            this(dimensionId, parameters, null);
+        }
+
+        private StartupPreparedDimension withActivationFuture(CompletableFuture<LiveDimensionInstantiator.Result> future) {
+            return new StartupPreparedDimension(dimensionId, parameters, future);
+        }
     }
 
     public enum EntryPreparationMode {

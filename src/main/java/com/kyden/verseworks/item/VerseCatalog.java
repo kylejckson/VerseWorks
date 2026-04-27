@@ -23,6 +23,7 @@ import java.util.Locale;
 
 public final class VerseCatalog {
     private static final float CRYSTAL_BIOME_DROP_CHANCE = 0.60F;
+    private static final float BLANK_VERSE_DROP_CHANCE = 0.12F;
     private static final List<SkyColorEntry> SKY_COLOR_VERSES = List.of(
         new SkyColorEntry("White", 0x00F9FFFE),
         new SkyColorEntry("Light Gray", 0x009D9D97),
@@ -65,13 +66,17 @@ public final class VerseCatalog {
         }
     }
 
-    public static ItemStack createRandomDropVerse(Item item, HolderLookup.Provider provider, RandomSource random) {
-        boolean useBiomeVerse = random.nextFloat() < CRYSTAL_BIOME_DROP_CHANCE;
-        if (useBiomeVerse) {
-            return createRandomBiomeVerse(item, provider, random);
+    public static ItemStack createRandomDropReward(Item verseItem, Item blankVerseItem, HolderLookup.Provider provider, RandomSource random) {
+        if (random.nextFloat() < BLANK_VERSE_DROP_CHANCE) {
+            return new ItemStack(blankVerseItem);
         }
 
-        return createRandomNonBiomeVerse(item, random);
+        boolean useBiomeVerse = random.nextFloat() < CRYSTAL_BIOME_DROP_CHANCE;
+        if (useBiomeVerse) {
+            return createRandomBiomeVerse(verseItem, provider, random);
+        }
+
+        return createRandomNonBiomeVerse(verseItem, random);
     }
 
     public static ItemStack createRandomBiomeVerse(Item item, HolderLookup.Provider provider, RandomSource random) {
@@ -111,13 +116,19 @@ public final class VerseCatalog {
         for (VerseDimensionWorldType worldType : VerseDimensionWorldType.values()) {
             verses.add(worldTypeVerse(worldType));
         }
+        verses.addAll(mobSpawnVerses());
         verses.addAll(sphereOreVerses());
         verses.addAll(environmentVerses());
+        verses.addAll(VerseEffects.catalogEntries());
         return verses;
     }
 
     private static VerseData biomeVerse(ResourceLocation biomeId) {
-        return VerseData.stringValue("Bioma", VerseText.displayBiomeName(biomeId), "biome", "biomeId", biomeId.toString(), biomeId.toString());
+        String label = VerseText.displayBiomeName(biomeId).trim();
+        if (label.isBlank()) {
+            label = biomeId.toString();
+        }
+        return VerseData.stringValue("Bioma", label, "biome", "biomeId", biomeId.toString(), biomeId.toString());
     }
 
     private static VerseData skyColorVerse(SkyColorEntry entry) {
@@ -130,6 +141,10 @@ public final class VerseCatalog {
 
     private static List<VerseData> environmentVerses() {
         return List.of(
+            VerseData.booleanValue("", "Caves", "terrain", "caves", true, "true"),
+            VerseData.booleanValue("Anti-", "Caves", "terrain", "caves", false, "false"),
+            VerseData.booleanValue("", "Chasms", "terrain", "chasms", true, "true"),
+            VerseData.booleanValue("Anti-", "Chasms", "terrain", "chasms", false, "false"),
             VerseData.booleanValue("Anti-", "Spheres", "sphere", "spheres", false, "false"),
             VerseData.booleanValue("", "Stabilized Realm", "stability", "stabilizedRealm", true, "true"),
             VerseData.doubleValue("Gravitas", "Low", "gravity", "gravityScale", 0.25D, trimmedDouble(0.25D)),
@@ -152,6 +167,16 @@ public final class VerseCatalog {
             VerseData.doubleValue("Metallum", "I", "ore", "oreMultiplier", 2.0D, trimmedDouble(2.0D)),
             VerseData.doubleValue("Metallum", "II", "ore", "oreMultiplier", 4.0D, trimmedDouble(4.0D)),
             VerseData.doubleValue("Metallum", "III", "ore", "oreMultiplier", 8.0D, trimmedDouble(8.0D))
+        );
+    }
+
+    private static List<VerseData> mobSpawnVerses() {
+        return List.of(
+            VerseData.doubleValue("Bestia", "Off", "spawn", "mobSpawnMultiplier", 0.0D, trimmedDouble(0.0D)),
+            VerseData.doubleValue("Bestia", "Half", "spawn", "mobSpawnMultiplier", 0.5D, trimmedDouble(0.5D)),
+            VerseData.doubleValue("Bestia", "Normal", "spawn", "mobSpawnMultiplier", 1.0D, trimmedDouble(1.0D)),
+            VerseData.doubleValue("Bestia", "Double", "spawn", "mobSpawnMultiplier", 2.0D, trimmedDouble(2.0D)),
+            VerseData.doubleValue("Bestia", "Triple", "spawn", "mobSpawnMultiplier", 3.0D, trimmedDouble(3.0D))
         );
     }
 
@@ -208,7 +233,104 @@ public final class VerseCatalog {
     }
 
     private static ItemStack createStack(Item item, VerseData data) {
-        return data.apply(new ItemStack(item));
+        return sanitizeVerseData(data).apply(new ItemStack(item));
+    }
+
+    private static VerseData sanitizeVerseData(VerseData data) {
+        String prefix = data.prefix() == null ? "" : data.prefix().trim();
+        String label = requiredText(data.label(), deriveLabelFallback(data));
+        String verseType = requiredText(data.verseType(), "unknown");
+        String parameterKey = requiredText(data.parameterKey(), "unknown");
+        String amountText = requiredText(data.amountText(), deriveAmountFallback(data));
+        String secondaryParameterKey = optionalText(data.secondaryParameterKey());
+        String secondaryAmountText = optionalText(data.secondaryAmountText());
+        if ((secondaryParameterKey == null) != (secondaryAmountText == null)) {
+            secondaryParameterKey = null;
+            secondaryAmountText = null;
+        }
+
+        VerseData sanitized = new VerseData(
+            prefix,
+            label,
+            verseType,
+            parameterKey,
+            amountText,
+            data.stringValue(),
+            data.intValue(),
+            data.doubleValue(),
+            data.booleanValue(),
+            secondaryParameterKey,
+            secondaryAmountText
+        );
+        if (isRenderableVerseData(sanitized)) {
+            return sanitized;
+        }
+        return skyColorVerse(SKY_COLOR_VERSES.getFirst());
+    }
+
+    private static boolean isRenderableVerseData(VerseData data) {
+        return !data.label().isBlank()
+            && !data.verseType().isBlank()
+            && !data.parameterKey().isBlank()
+            && !data.amountText().isBlank();
+    }
+
+    private static String deriveLabelFallback(VerseData data) {
+        if (data.stringValue() != null && !data.stringValue().isBlank()) {
+            ResourceLocation parsedId = ResourceLocation.tryParse(data.stringValue());
+            if (parsedId != null) {
+                String resourceLabel = VerseText.displayBiomeName(parsedId).trim();
+                if (!resourceLabel.isBlank()) {
+                    return resourceLabel;
+                }
+                return parsedId.toString();
+            }
+
+            String humanized = VerseText.humanize(data.stringValue()).trim();
+            if (!humanized.isBlank()) {
+                return humanized;
+            }
+            return data.stringValue().trim();
+        }
+
+        String parameterSource = data.parameterKey() == null ? "" : data.parameterKey();
+        String parameterLabel = VerseText.humanize(parameterSource).trim();
+        if (!parameterLabel.isBlank()) {
+            return parameterLabel;
+        }
+        return "Unknown";
+    }
+
+    private static String deriveAmountFallback(VerseData data) {
+        if (data.stringValue() != null && !data.stringValue().isBlank()) {
+            return data.stringValue().trim();
+        }
+        if (data.intValue() != null) {
+            return Integer.toString(data.intValue());
+        }
+        if (data.doubleValue() != null) {
+            return trimmedDouble(data.doubleValue());
+        }
+        if (data.booleanValue() != null) {
+            return Boolean.toString(data.booleanValue());
+        }
+        return "unknown";
+    }
+
+    private static String requiredText(String value, String fallback) {
+        String trimmed = optionalText(value);
+        if (trimmed != null) {
+            return trimmed;
+        }
+        return fallback.trim();
+    }
+
+    private static String optionalText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private static String trimmedDouble(double value) {

@@ -1,0 +1,23 @@
+{
+  "id": "stability_and_corruption",
+  "title_key": "guidebook.chapter.stability_and_corruption.title",
+  "summary_key": "guidebook.chapter.stability_and_corruption.summary",
+  "sort_order": 6,
+  "icon": {
+    "type": "item",
+    "value": "verseworks:stabilized_warp"
+  },
+  "pages": [
+    {
+      "type": "feature_callout",
+      "title_key": "guidebook.entry.stability_warp.title",
+      "body_keys": [
+        "guidebook.entry.stability_warp.body.1"
+      ],
+      "icon": {
+        "type": "item",
+        "value": "verseworks:stabilized_warp"
+      }
+    }
+  ]
+}

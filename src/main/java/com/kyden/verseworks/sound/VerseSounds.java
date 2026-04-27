@@ -23,6 +23,7 @@ public final class VerseSounds {
     public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_ENTER = register("meteor_enter");
     public static final DeferredHolder<SoundEvent, SoundEvent> METEOR_IMPACT = register("meteor_impact");
     public static final DeferredHolder<SoundEvent, SoundEvent> RITUAL_COMPLETE = register("ritual_complete");
+    public static final DeferredHolder<SoundEvent, SoundEvent> COLLAPSE = register("collapse", 256.0F);
 
     private VerseSounds() {
     }

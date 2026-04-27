@@ -1,0 +1,5 @@
+{
+  "type": "verseworks:add_features_all_biomes",
+  "features": "verseworks:giant_crystal",
+  "step": "surface_structures"
+}

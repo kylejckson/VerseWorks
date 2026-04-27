@@ -29,9 +29,7 @@ public final class MysticCrateBlock extends Block {
 
         RandomSource random = level.getRandom();
         if (random.nextFloat() < VERSE_DROP_CHANCE) {
-            ItemStack verseDrop = random.nextBoolean()
-                ? VerseCatalog.createRandomBiomeVerse(VerseItems.VERSE.get(), level.registryAccess(), random)
-                : VerseCatalog.createRandomNonBiomeVerse(VerseItems.VERSE.get(), random);
+            ItemStack verseDrop = VerseCatalog.createRandomDropReward(VerseItems.VERSE.get(), VerseItems.BLANK_VERSE.get(), level.registryAccess(), random);
             Block.popResource(level, pos, verseDrop);
             spawnSuccessParticles(level, pos);
             ExperienceOrb.award(level, Vec3.atCenterOf(pos), 3 + random.nextInt(4));

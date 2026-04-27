@@ -1,0 +1,23 @@
+{
+  "title_key": "guidebook.verseworks.title",
+  "subtitle_key": "guidebook.verseworks.subtitle",
+  "version": "v1",
+  "landing_chapter_ids": [
+    "getting_started",
+    "rituals",
+    "hyperbooks",
+    "dimensions",
+    "troubleshooting"
+  ],
+  "chapter_order": [
+    "welcome",
+    "getting_started",
+    "verses",
+    "rituals",
+    "hyperbooks",
+    "dimensions",
+    "stability_and_corruption",
+    "tools_and_debug",
+    "troubleshooting"
+  ]
+}

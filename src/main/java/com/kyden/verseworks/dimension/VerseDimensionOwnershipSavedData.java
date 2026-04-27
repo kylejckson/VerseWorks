@@ -40,6 +40,12 @@ public final class VerseDimensionOwnershipSavedData extends SavedData {
         }
     }
 
+    public void forgetOwner(ResourceLocation dimensionId) {
+        if (ownersByDimension.remove(dimensionId) != null) {
+            setDirty();
+        }
+    }
+
     public long countOwnedDimensions(MinecraftServer server, UUID ownerId) {
         Set<ResourceLocation> knownDimensions = VerseDimensionCatalog.knownDimensionIds(server);
         return knownDimensions.stream()

@@ -5,6 +5,8 @@ import com.kyden.verseworks.attachment.VerseAttachments;
 import com.kyden.verseworks.block.VerseBlocks;
 import com.kyden.verseworks.command.VerseWorksCommands;
 import com.kyden.verseworks.dimension.VerseChunkGenerator;
+import com.kyden.verseworks.dimension.HyperBookCollapseHooks;
+import com.kyden.verseworks.dimension.VerseDimensionMobSpawnHooks;
 import com.kyden.verseworks.dimension.VerseDimensionParameterSync;
 import com.kyden.verseworks.dimension.VerseDimensionRuntimeHooks;
 import com.kyden.verseworks.entity.VerseEntities;
@@ -48,6 +50,8 @@ public final class VerseWorks {
         // registry setup has already completed.
         NeoForge.EVENT_BUS.addListener(VerseWorksCommands::register);
         VerseDimensionRuntimeHooks.register();
+        VerseDimensionMobSpawnHooks.register();
+        HyperBookCollapseHooks.register();
         HyperBookRitualHooks.register();
 
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);

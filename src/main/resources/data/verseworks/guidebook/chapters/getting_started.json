@@ -1,0 +1,32 @@
+{
+  "id": "getting_started",
+  "title_key": "guidebook.chapter.getting_started.title",
+  "summary_key": "guidebook.chapter.getting_started.summary",
+  "sort_order": 1,
+  "icon": {
+    "type": "item",
+    "value": "verseworks:blank_verse"
+  },
+  "pages": [
+    {
+      "type": "item_spotlight",
+      "title_key": "guidebook.entry.getting_started_materials.title",
+      "body_keys": [
+        "guidebook.entry.getting_started_materials.body.1",
+        "guidebook.entry.getting_started_materials.body.2"
+      ],
+      "icon_label_key": "item.verseworks.blank_verse",
+      "icon": {
+        "type": "item",
+        "value": "verseworks:blank_verse"
+      }
+    },
+    {
+      "type": "text",
+      "title_key": "guidebook.entry.getting_started_keep.title",
+      "body_keys": [
+        "guidebook.entry.getting_started_keep.body.1"
+      ]
+    }
+  ]
+}

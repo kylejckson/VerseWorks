@@ -41,10 +41,20 @@ public final class VerseText {
 
     public static String displayBiomeName(ResourceLocation biomeId) {
         String label = humanize(biomeId.getPath());
+        if (label.isBlank()) {
+            label = biomeId.getPath().trim();
+        }
         if (ResourceLocation.DEFAULT_NAMESPACE.equals(biomeId.getNamespace())) {
             return label;
         }
-        return humanize(biomeId.getNamespace()) + " " + label;
+        String namespaceLabel = humanize(biomeId.getNamespace());
+        if (namespaceLabel.isBlank()) {
+            return label;
+        }
+        if (label.isBlank()) {
+            return namespaceLabel;
+        }
+        return namespaceLabel + " " + label;
     }
 
     public static String formatTimeOfDay(long dayTime) {

@@ -22,8 +22,6 @@ public final class MysticCrystalCaveFeature extends Feature<NoneFeatureConfigura
     private static final int FALLBACK_SCAN_RADIUS_XZ = 6;
     private static final int FALLBACK_SCAN_RADIUS_Y = 5;
     private static final int CLUSTER_NEIGHBOR_ATTEMPTS = 10;
-    private static final float OTHER_DIMENSION_PLACEMENT_CHANCE = 0.18F;
-
     public MysticCrystalCaveFeature(Codec<NoneFeatureConfiguration> codec) {
         super(codec);
     }
@@ -78,7 +76,7 @@ public final class MysticCrystalCaveFeature extends Feature<NoneFeatureConfigura
         if (isVerseWorksLevel(level)) {
             return random.nextFloat() < Config.MYSTIC_CRYSTAL_VERSE_DIMENSION_PLACEMENT_CHANCE.get().floatValue();
         }
-        return random.nextFloat() < OTHER_DIMENSION_PLACEMENT_CHANCE;
+        return false;
     }
 
     private static Placement findPlacement(WorldGenLevel level, BlockPos origin, RandomSource random) {

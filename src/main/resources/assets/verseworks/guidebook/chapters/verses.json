@@ -1,0 +1,31 @@
+{
+  "id": "verses",
+  "title_key": "guidebook.chapter.verses.title",
+  "summary_key": "guidebook.chapter.verses.summary",
+  "sort_order": 2,
+  "icon": {
+    "type": "item",
+    "value": "verseworks:verse"
+  },
+  "pages": [
+    {
+      "type": "text",
+      "title_key": "guidebook.entry.verses_families.title",
+      "body_keys": [
+        "guidebook.entry.verses_families.body.1",
+        "guidebook.entry.verses_families.body.2"
+      ]
+    },
+    {
+      "type": "feature_callout",
+      "title_key": "guidebook.entry.verses_shapes.title",
+      "body_keys": [
+        "guidebook.entry.verses_shapes.body.1"
+      ],
+      "icon": {
+        "type": "item",
+        "value": "minecraft:diamond_ore"
+      }
+    }
+  ]
+}

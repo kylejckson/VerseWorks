@@ -6,16 +6,20 @@ import com.kyden.verseworks.advancement.VerseWorksAdvancements;
 import com.kyden.verseworks.attachment.HyperBookLecternLink;
 import com.kyden.verseworks.attachment.VerseAttachments;
 import com.kyden.verseworks.dimension.GeneratedDimensionPackWriter;
+import com.kyden.verseworks.dimension.HyperBookCollapseHooks;
 import com.kyden.verseworks.dimension.LiveDimensionInstantiator;
 import com.kyden.verseworks.dimension.VerseDimensionCatalog;
 import com.kyden.verseworks.dimension.VerseDimensionCorruption;
+import com.kyden.verseworks.dimension.VerseDimensionEntryPointSavedData;
 import com.kyden.verseworks.dimension.VerseDimensionOwnershipSavedData;
 import com.kyden.verseworks.dimension.VerseDimensionParameters;
 import com.kyden.verseworks.dimension.VerseDimensionRuntimeHooks;
+import com.kyden.verseworks.dimension.VerseStructureGroups;
 import com.kyden.verseworks.dimension.VerseDimensionWorldType;
 import com.kyden.verseworks.item.HyperBookData;
 import com.kyden.verseworks.item.VerseCatalog;
 import com.kyden.verseworks.item.VerseData;
+import com.kyden.verseworks.item.VerseEffects;
 import com.kyden.verseworks.item.VerseItems;
 import com.kyden.verseworks.sound.VerseSounds;
 import net.minecraft.ChatFormatting;
@@ -56,6 +60,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.nbt.CompoundTag;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.util.TriState;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
@@ -82,6 +87,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 public final class HyperBookRitualHooks {
+    private static final String STARTER_GUIDEBOOK_TAG = "VerseWorksStarterGuidebook";
     private static final int CAULDRON_SCAN_INTERVAL_TICKS = 10;
     private static final int CAULDRON_SCAN_RADIUS = 8;
     private static final int CAULDRON_SOUND_INTERVAL_TICKS = 64;
@@ -96,8 +102,9 @@ public final class HyperBookRitualHooks {
     private static final double LECTERN_TETHER_HEIGHT = 4.8D;
     private static final int HYPER_BOOK_DUST_COST = 16;
     private static final int UNLINKED_HYPER_BOOK_DUST_COST = 32;
+    private static final int VERSE_DUPLICATION_DUST_COST = 1;
     private static final int MAX_PENDING_RITUALS_PER_LEVEL = 4;
-    private static final long CAULDRON_ITEM_TIMEOUT_TICKS = 15L * 20L;
+    private static final long CAULDRON_ITEM_TIMEOUT_TICKS = 60L * 20L;
     private static final long RITUAL_ACTIVITY_GRACE_TICKS = 20L * 30L;
     private static final int CORRUPTION_WARNING_MIN_RADIUS = 10;
     private static final int CORRUPTION_WARNING_MAX_RADIUS = 20;
@@ -139,14 +146,18 @@ public final class HyperBookRitualHooks {
         "meteorshowers", "meteor_showers",
         "spawnwarp", "spawn_warp",
         "oremultiplier", "ore_multiplier",
+        "mobspawnmultiplier", "mob_spawn_multiplier", "mobspawns", "mob_spawns",
         "spheres",
+        "caves",
+        "chasms",
         "lakes",
         "structures",
         "oceanlevel", "ocean_level",
         "floorblock", "floor_block",
         "stabilizedrealm", "stabilized_realm",
         "sphereblock", "sphere_block", "spherematerial",
-        "fluidid", "fluid"
+        "fluidid", "fluid",
+        "structuregroup", "shapefeature", "poolfeature", "surfaceprofile", "crystalclusters"
     );
 
     private HyperBookRitualHooks() {
@@ -181,8 +192,30 @@ public final class HyperBookRitualHooks {
 
     private static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            processNearbyLecterns((ServerLevel) player.level());
+            giveStarterGuidebook(player);
         }
+
+        // Let the normal lectern scan tick handle login recovery so startup does not spike
+        // while dimensions are also being restored in the background.
+    }
+
+    private static void giveStarterGuidebook(ServerPlayer player) {
+        if (!Config.startWithGuidebook()) {
+            return;
+        }
+
+        CompoundTag persisted = player.getPersistentData().getCompound(Player.PERSISTED_NBT_TAG);
+        if (persisted.getBoolean(STARTER_GUIDEBOOK_TAG)) {
+            return;
+        }
+
+        ItemStack guidebook = new ItemStack(VerseItems.GUIDEBOOK.get());
+        if (!player.getInventory().add(guidebook)) {
+            player.drop(guidebook, false);
+        }
+
+        persisted.putBoolean(STARTER_GUIDEBOOK_TAG, true);
+        player.getPersistentData().put(Player.PERSISTED_NBT_TAG, persisted);
     }
 
     private static void onLevelSave(LevelEvent.Save event) {
@@ -408,9 +441,11 @@ public final class HyperBookRitualHooks {
         List<ItemEntity> verseEntities = new ArrayList<>();
         List<VerseData> verses = new ArrayList<>();
         ItemEntity hyperDustEntity = null;
+        ItemEntity blankVerseEntity = null;
         ItemEntity paperEntity = null;
         ItemEntity writtenBookEntity = null;
         ItemEntity dyeEntity = null;
+        ItemEntity glowInkEntity = null;
         Integer labelColor = null;
         ItemStack writtenBookStack = ItemStack.EMPTY;
 
@@ -425,6 +460,10 @@ public final class HyperBookRitualHooks {
                 hyperDustEntity = entity;
             }
 
+            if (blankVerseEntity == null && stack.is(VerseItems.BLANK_VERSE.get())) {
+                blankVerseEntity = entity;
+            }
+
             if (paperEntity == null && stack.is(Items.PAPER)) {
                 paperEntity = entity;
             }
@@ -434,10 +473,24 @@ public final class HyperBookRitualHooks {
                 writtenBookStack = stack.copyWithCount(1);
             }
 
+            if (glowInkEntity == null && stack.is(Items.GLOW_INK_SAC)) {
+                glowInkEntity = entity;
+            }
+
             if (dyeEntity == null && stack.getItem() instanceof DyeItem dyeItem) {
                 dyeEntity = entity;
                 labelColor = dyeColorValue(dyeItem);
             }
+        }
+
+        if (tryDuplicateVerse(level, cauldronPos, verseEntities, hyperDustEntity, blankVerseEntity, glowInkEntity)) {
+            return;
+        }
+
+        if (!Config.allowHyperBookCreation() && isHyperBookRecipeCandidate(verseEntities, hyperDustEntity, paperEntity, writtenBookEntity)) {
+            findNearestPlayer(level, Vec3.atCenterOf(cauldronPos), 8.0D)
+                .ifPresent(player -> player.sendSystemMessage(Component.literal("The cauldron refuses to weave Hyper Books right now.").withStyle(ChatFormatting.YELLOW)));
+            return;
         }
 
         if (tryCraftUnlinkedHyperBook(level, cauldronPos, verseEntities, hyperDustEntity, paperEntity, writtenBookEntity)) {
@@ -604,6 +657,7 @@ public final class HyperBookRitualHooks {
                 Throwable cause = exception.getCause() != null ? exception.getCause() : exception;
                 VerseDimensionCatalog.forget(activeRitual.dimensionId());
                 GeneratedDimensionPackWriter.deleteDimension(level.getServer(), activeRitual.dimensionId());
+                VerseDimensionEntryPointSavedData.get(level.getServer()).forgetDimension(activeRitual.dimensionId());
                 VerseWorks.LOGGER.error("Hyper Book ritual processing failed at {} in {}", activeRitual.job().cauldronPos(), level.dimension().location(), cause);
                 findNearestPlayer(level, Vec3.atCenterOf(activeRitual.job().cauldronPos()), 8.0D)
                     .ifPresent(player -> player.sendSystemMessage(Component.literal("The new Hyperbook's destination failed to stabilize.").withStyle(ChatFormatting.RED)));
@@ -643,7 +697,8 @@ public final class HyperBookRitualHooks {
                 job.writtenBookStack(),
                 dimensionId,
                 job.dimensionName(),
-                job.labelColor()
+                job.labelColor(),
+                ritualOwner.map(ServerPlayer::getUUID).orElse(null)
             );
             ejectUnusedRitualItems(level, job.cauldronPos());
             launchCraftedBook(level, job.cauldronPos(), hyperBook);
@@ -769,6 +824,16 @@ public final class HyperBookRitualHooks {
             options.lakes,
             options.oceanLevel,
             options.structures,
+            options.mobSpawnMultiplier,
+            options.cavesEnabled,
+            options.chasmsEnabled,
+            options.structureControl,
+            options.shapeFeatures,
+            options.poolFeatures,
+            options.oreMorphFeatures,
+            options.surfaceProfile,
+            options.skyProfile,
+            options.crystalClusters,
             List.copyOf(options.corruptions),
             0L
         );
@@ -855,6 +920,22 @@ public final class HyperBookRitualHooks {
                     options.oreMultiplier = verse.doubleValue();
                 }
             }
+            case "mobSpawnMultiplier", "mob_spawn_multiplier", "mobSpawns", "mob_spawns" -> {
+                if (verse.doubleValue() != null) {
+                    options.explicitMobSpawns = true;
+                    options.mobSpawnMultiplier = verse.doubleValue();
+                }
+            }
+            case "caves" -> {
+                if (verse.booleanValue() != null) {
+                    options.cavesEnabled = verse.booleanValue();
+                }
+            }
+            case "chasms" -> {
+                if (verse.booleanValue() != null) {
+                    options.chasmsEnabled = verse.booleanValue();
+                }
+            }
             case "spheres" -> {
                 if (verse.booleanValue() != null) {
                     if (!verse.booleanValue() || isAntiVerse(verse)) {
@@ -906,9 +987,68 @@ public final class HyperBookRitualHooks {
                     }
                 }
             }
+            case "structureGroup", "structuregroup" -> {
+                if (verse.stringValue() != null) {
+                    String normalized = verse.stringValue().toLowerCase(Locale.ROOT);
+                    if (normalized.equals("none")) {
+                        options.structureControl = new VerseDimensionParameters.StructureControlProfile(VerseDimensionParameters.StructureControlMode.NONE, List.of(), List.of(), List.of(), List.of());
+                        options.structures = false;
+                        options.structuresExplicitlySet = true;
+                    } else if (VerseStructureGroups.knownGroups().contains(normalized)) {
+                        options.structureControl = new VerseDimensionParameters.StructureControlProfile(VerseDimensionParameters.StructureControlMode.ALLOWLIST, List.of(normalized), List.of(), List.of(), List.of());
+                        options.structures = true;
+                        options.structuresExplicitlySet = true;
+                    }
+                }
+            }
+            case "shapeFeature", "shapefeature" -> {
+                if (verse.stringValue() != null) {
+                    options.shapeFeatures = List.of(parseShapeFeatureString(verse.stringValue()));
+                }
+            }
+            case "poolFeature", "poolfeature" -> {
+                if (verse.stringValue() != null) {
+                    options.poolFeatures = List.of(parsePoolFeatureString(verse.stringValue()));
+                }
+            }
+            case "surfaceProfile", "surfaceprofile" -> {
+                if (verse.stringValue() != null) {
+                    options.surfaceProfile = VerseDimensionParameters.SurfaceProfile.fromBlock(parseBlock(verse.stringValue()));
+                }
+            }
+            case "crystalClusters", "crystalclusters" -> {
+                if (verse.booleanValue() != null) {
+                    options.crystalClusters = verse.booleanValue();
+                }
+            }
             default -> {
             }
         }
+    }
+
+    private static VerseDimensionParameters.ShapeFeatureSpec parseShapeFeatureString(String value) {
+        String[] parts = value.split("\\|", 2);
+        if (parts.length != 2) {
+            throw new IllegalArgumentException("Invalid shape feature value " + value);
+        }
+        VerseDimensionParameters.ShapeKind shapeKind = VerseDimensionParameters.ShapeKind.parse(parts[0]);
+        return new VerseDimensionParameters.ShapeFeatureSpec(
+            shapeKind,
+            parseBlock(parts[1]),
+            shapeKind == VerseDimensionParameters.ShapeKind.CUBE ? 2 : 5,
+            shapeKind == VerseDimensionParameters.ShapeKind.CUBE ? 3 : 9,
+            shapeKind == VerseDimensionParameters.ShapeKind.CUBE ? 0.01D : 0.025D,
+            new VerseDimensionParameters.HeightDistribution("surface"),
+            false
+        );
+    }
+
+    private static VerseDimensionParameters.PoolFeatureSpec parsePoolFeatureString(String value) {
+        ResourceLocation fluidId = ResourceLocation.tryParse(value);
+        if (fluidId == null) {
+            throw new IllegalArgumentException("Invalid pool fluid " + value);
+        }
+        return new VerseDimensionParameters.PoolFeatureSpec(fluidId, 6, 3, 0.0325D);
     }
 
     private static void applySecondaryOption(RecipeOptions options, String key, String value) {
@@ -916,6 +1056,68 @@ public final class HyperBookRitualHooks {
         if (temporalKey != null) {
             applyTemporalToggle(options, temporalKey, parseBoolean(value));
         }
+    }
+
+    private static boolean tryDuplicateVerse(
+        ServerLevel level,
+        BlockPos cauldronPos,
+        List<ItemEntity> verseEntities,
+        ItemEntity hyperDustEntity,
+        ItemEntity blankVerseEntity,
+        ItemEntity glowInkEntity
+    ) {
+        if (verseEntities.size() != 1 || hyperDustEntity == null || blankVerseEntity == null || glowInkEntity == null) {
+            return false;
+        }
+
+        if (hyperDustEntity.getItem().getCount() < VERSE_DUPLICATION_DUST_COST) {
+            return false;
+        }
+
+        ItemEntity verseEntity = verseEntities.getFirst();
+        if (level.random.nextInt(3) == 0) {
+            consumeItemEntity(verseEntity, 1);
+            consumeItemEntity(hyperDustEntity, VERSE_DUPLICATION_DUST_COST);
+            consumeItemEntity(blankVerseEntity, 1);
+            consumeItemEntity(glowInkEntity, 1);
+            consumeCauldronWater(level, cauldronPos);
+            markRecentRitualActivity(level);
+            level.sendParticles(ParticleTypes.SMOKE, cauldronPos.getX() + 0.5D, cauldronPos.getY() + 1.0D, cauldronPos.getZ() + 0.5D, 16, 0.18D, 0.08D, 0.18D, 0.02D);
+            findNearestPlayer(level, Vec3.atCenterOf(cauldronPos), 8.0D)
+                .ifPresent(player -> player.sendSystemMessage(Component.literal("The glow ink turns unstable and burns the verse away.").withStyle(ChatFormatting.RED)));
+            return true;
+        }
+
+        ItemStack duplicatedVerse = verseEntity.getItem().copyWithCount(1);
+        consumeItemEntity(verseEntity, 1);
+        consumeItemEntity(hyperDustEntity, VERSE_DUPLICATION_DUST_COST);
+        consumeItemEntity(blankVerseEntity, 1);
+        consumeItemEntity(glowInkEntity, 1);
+        consumeCauldronWater(level, cauldronPos);
+        markRecentRitualActivity(level);
+        launchCraftedItem(level, cauldronPos, duplicatedVerse.copy());
+        launchCraftedItem(level, cauldronPos, duplicatedVerse.copy());
+        return true;
+    }
+
+    private static boolean isHyperBookRecipeCandidate(
+        List<ItemEntity> verseEntities,
+        ItemEntity hyperDustEntity,
+        ItemEntity paperEntity,
+        ItemEntity writtenBookEntity
+    ) {
+        if (hyperDustEntity == null) {
+            return false;
+        }
+
+        if (writtenBookEntity != null && hyperDustEntity.getItem().getCount() >= HYPER_BOOK_DUST_COST) {
+            return true;
+        }
+
+        return verseEntities.isEmpty()
+            && writtenBookEntity == null
+            && paperEntity != null
+            && hyperDustEntity.getItem().getCount() >= UNLINKED_HYPER_BOOK_DUST_COST;
     }
 
     private static String canonicalTemporalOptionKey(String key) {
@@ -1062,20 +1264,16 @@ public final class HyperBookRitualHooks {
             return;
         }
 
-        VerseDimensionWorldType[] worldTypes = {
-            VerseDimensionWorldType.NORMAL,
-            VerseDimensionWorldType.AMPLIFIED,
-            VerseDimensionWorldType.SKY_ISLAND,
-            VerseDimensionWorldType.ISLAND
-        };
-        options.worldType = worldTypes[random.nextInt(worldTypes.length)];
+        List<VerseDimensionWorldType> worldTypes = Config.allowedRandomWorldTypes();
+        options.worldType = worldTypes.get(random.nextInt(worldTypes.size()));
 
         List<ResourceLocation> availableBiomes = server.registryAccess().lookupOrThrow(Registries.BIOME)
             .listElements()
             .map(holder -> holder.key().location())
+            .filter(Config::allowsRandomBiome)
             .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         if (availableBiomes.isEmpty()) {
-            throw new IllegalArgumentException("No biomes are available for ritual world generation");
+            throw new IllegalArgumentException("No biomes remain after applying the ritual randomization filters");
         }
 
         int minBiomeCount = randomBiomeMinCount(uniqueVerseCount);
@@ -1098,45 +1296,68 @@ public final class HyperBookRitualHooks {
             return;
         }
 
-        int targetCorruptions = targetCorruptionCount(verseCount, eligible.size(), random);
+        boolean lenientRandomness = usesLenientRandomnessCorruptionRoll(options, verseCount, random);
+        int targetCorruptions = targetCorruptionCount(verseCount, eligible.size(), random, lenientRandomness);
         for (int index = 0; index < targetCorruptions && !eligible.isEmpty(); index++) {
             applyRandomCorruption(options, eligible, random);
         }
     }
 
-    private static int targetCorruptionCount(int uniqueVerseCount, int eligibleCount, RandomSource random) {
-        int maxCorruptions = Math.max(1, eligibleCount - Math.min(uniqueVerseCount, Math.max(0, eligibleCount - 1)));
-        int minCorruptions = uniqueVerseCount <= 1 ? 3 : uniqueVerseCount <= 3 ? 2 : 1;
-        minCorruptions = Math.min(minCorruptions, eligibleCount);
-        maxCorruptions = Math.max(minCorruptions, maxCorruptions);
-        return randomBetweenInclusive(random, minCorruptions, maxCorruptions);
+    private static int targetCorruptionCount(int uniqueVerseCount, int eligibleCount, RandomSource random, boolean lenientRandomness) {
+        if (lenientRandomness) {
+            return randomBetweenInclusive(random, 0, Math.min(eligibleCount, 1));
+        }
+        if (uniqueVerseCount >= 5) {
+            return random.nextFloat() < 0.9F ? 0 : Math.min(eligibleCount, 1);
+        }
+        if (uniqueVerseCount == 4) {
+            return randomBetweenInclusive(random, 0, Math.min(eligibleCount, 1));
+        }
+        if (uniqueVerseCount == 3) {
+            return randomBetweenInclusive(random, 0, Math.min(eligibleCount, 1));
+        }
+        if (uniqueVerseCount == 2) {
+            return randomBetweenInclusive(random, 0, Math.min(eligibleCount, 2));
+        }
+        return randomBetweenInclusive(random, 0, Math.min(eligibleCount, 3));
+    }
+
+    private static boolean usesLenientRandomnessCorruptionRoll(RecipeOptions options, int uniqueVerseCount, RandomSource random) {
+        return uniqueVerseCount <= 3
+            && !options.explicitWorldType
+            && !options.explicitBiomes
+            && options.biomeIds.isEmpty()
+            && random.nextBoolean();
     }
 
     private static List<VerseDimensionCorruption> eligibleCorruptions(RecipeOptions options) {
         List<VerseDimensionCorruption> corruptions = new ArrayList<>();
-        if (!options.preventPermanentRain) {
+        if (Config.isCorruptionEffectEnabled(VerseDimensionCorruption.ENDLESS_RAIN) && !options.preventPermanentRain) {
             corruptions.add(VerseDimensionCorruption.ENDLESS_RAIN);
         }
-        if (!options.preventPermanentStorm && !options.preventPermanentRain && !options.preventPermanentLightning) {
+        if (Config.isCorruptionEffectEnabled(VerseDimensionCorruption.ENDLESS_STORM) && !options.preventPermanentStorm && !options.preventPermanentRain && !options.preventPermanentLightning) {
             corruptions.add(VerseDimensionCorruption.ENDLESS_STORM);
         }
-        if (!options.preventPermanentLightning) {
+        if (Config.isCorruptionEffectEnabled(VerseDimensionCorruption.ENDLESS_LIGHTNING) && !options.preventPermanentLightning) {
             corruptions.add(VerseDimensionCorruption.ENDLESS_LIGHTNING);
         }
-        if (!options.preventMeteorShowers) {
+        if (Config.isCorruptionEffectEnabled(VerseDimensionCorruption.METEORS) && !options.preventMeteorShowers) {
             corruptions.add(VerseDimensionCorruption.METEORS);
         }
-        if (!options.preventSpawnWarp) {
+        if (Config.isCorruptionEffectEnabled(VerseDimensionCorruption.WARP) && !options.preventSpawnWarp) {
             corruptions.add(VerseDimensionCorruption.WARP);
         }
-        if (!options.preventPermanentTime) {
+        if (Config.isCorruptionEffectEnabled(VerseDimensionCorruption.FIXED_TIME) && !options.preventPermanentTime) {
             corruptions.add(VerseDimensionCorruption.FIXED_TIME);
         }
-        if (!options.preventGravity && !options.explicitGravity) {
+        if (Config.isCorruptionEffectEnabled(VerseDimensionCorruption.GRAVITY) && !options.preventGravity && !options.explicitGravity) {
             corruptions.add(VerseDimensionCorruption.GRAVITY);
         }
-        if (!options.preventSpheres) {
+        if (Config.isCorruptionEffectEnabled(VerseDimensionCorruption.SPHERES) && !options.preventSpheres) {
             corruptions.add(VerseDimensionCorruption.SPHERES);
+        }
+        if (Config.isCorruptionEffectEnabled(VerseDimensionCorruption.HOSTILE_HORDES) && !options.explicitMobSpawns) {
+            corruptions.add(VerseDimensionCorruption.HOSTILE_HORDES);
         }
         return corruptions;
     }
@@ -1158,6 +1379,7 @@ public final class HyperBookRitualHooks {
                 options.timeOfDay = random.nextInt(24000);
             }
             case GRAVITY -> options.gravityScale = random.nextBoolean() ? 0.25D : 4.0D;
+            case HOSTILE_HORDES -> options.mobSpawnMultiplier = 3.0D;
             case SPHERES -> {
                 if (options.sphereBlock == null) {
                     options.spheres = true;
@@ -1301,14 +1523,14 @@ public final class HyperBookRitualHooks {
         return debugCauldrons != null && debugCauldrons.contains(cauldronPos);
     }
 
-    private static ItemStack createLinkedHyperBook(ItemStack writtenBook, ResourceLocation dimensionId, String dimensionName, Integer labelColor) {
+    private static ItemStack createLinkedHyperBook(ItemStack writtenBook, ResourceLocation dimensionId, String dimensionName, Integer labelColor, UUID creatorId) {
         ItemStack hyperBook = new ItemStack(VerseItems.HYPER_BOOK.get());
         WrittenBookContent writtenBookContent = writtenBook.get(DataComponents.WRITTEN_BOOK_CONTENT);
         if (writtenBookContent != null) {
             hyperBook.set(DataComponents.WRITTEN_BOOK_CONTENT, writtenBookContent);
         }
         hyperBook.set(DataComponents.CUSTOM_NAME, hyperBookName(dimensionName, labelColor));
-        return new HyperBookData(dimensionId, dimensionName, labelColor).apply(hyperBook);
+        return new HyperBookData(dimensionId, dimensionName, creatorId, labelColor).apply(hyperBook);
     }
 
     private static Component hyperBookName(String dimensionName, Integer labelColor) {
@@ -1337,10 +1559,10 @@ public final class HyperBookRitualHooks {
         };
     }
 
-    private static void launchCraftedBook(ServerLevel level, BlockPos cauldronPos, ItemStack hyperBook) {
+    private static void launchCraftedItem(ServerLevel level, BlockPos cauldronPos, ItemStack craftedStack) {
         Vec3 start = Vec3.atCenterOf(cauldronPos).add(0.0D, 0.85D, 0.0D);
         Optional<ServerPlayer> nearestPlayer = findNearestPlayer(level, start, 8.0D);
-        ItemEntity itemEntity = new ItemEntity(level, start.x(), start.y(), start.z(), hyperBook);
+        ItemEntity itemEntity = new ItemEntity(level, start.x(), start.y(), start.z(), craftedStack);
 
         Vec3 launchVelocity = new Vec3(0.0D, 0.42D, 0.0D);
         if (nearestPlayer.isPresent()) {
@@ -1358,6 +1580,10 @@ public final class HyperBookRitualHooks {
         level.sendParticles(ParticleTypes.ENCHANT, start.x(), start.y() + 0.15D, start.z(), 20, 0.18D, 0.18D, 0.18D, 0.15D);
         level.sendParticles(ParticleTypes.POOF, start.x(), start.y() + 0.1D, start.z(), 10, 0.12D, 0.08D, 0.12D, 0.02D);
         level.playSound(null, cauldronPos, VerseSounds.RITUAL_COMPLETE.get(), SoundSource.BLOCKS, 1.0F, 1.0F);
+    }
+
+    private static void launchCraftedBook(ServerLevel level, BlockPos cauldronPos, ItemStack hyperBook) {
+        launchCraftedItem(level, cauldronPos, hyperBook);
     }
 
     private static void markDimensionPendingWarmup(ResourceLocation dimensionId, VerseDimensionParameters parameters, long gameTime) {
@@ -1540,11 +1766,20 @@ public final class HyperBookRitualHooks {
 
             ServerLevel destination = findExistingDestination(level.getServer(), pending.destinationId());
             if (destination == null) {
-                cancelledLecterns.add(lecternPos);
+                if (!LiveDimensionInstantiator.isActivationInProgress(pending.destinationId())) {
+                    VerseDimensionCatalog.get(level.getServer(), pending.destinationId())
+                        .ifPresentOrElse(
+                            parameters -> LiveDimensionInstantiator.activateAsync(level.getServer(), pending.destinationId(), parameters),
+                            () -> cancelledLecterns.add(lecternPos)
+                        );
+                }
                 continue;
             }
 
             VerseDimensionRuntimeHooks.ensureEntryPreparationScheduled(level.getServer(), destination);
+            if (!queuePendingLecternTargetWarmup(level, lecternPos, pending, destination)) {
+                continue;
+            }
             if (!isHyperBookDestinationReady(level, lecternPos, destination, pending.destinationId())) {
                 continue;
             }
@@ -1587,10 +1822,7 @@ public final class HyperBookRitualHooks {
             if (!pending.notified()) {
                 sendLecternCompletionFeedback(level, lecternPos, pending.playerIds());
                 pendingCompletions.put(lecternPos, pending.withState(gameTime + HYPER_BOOK_READY_DISPLAY_TICKS, true));
-                continue;
             }
-
-            finishedLecterns.add(lecternPos);
         }
 
         finishedLecterns.forEach(pendingCompletions::remove);
@@ -1639,11 +1871,52 @@ public final class HyperBookRitualHooks {
 
         Optional<Vec3> savedTarget = data.get().targetPosition();
         Optional<Vec3> preparedTarget = savedTarget.isPresent() ? savedTarget : VerseDimensionRuntimeHooks.preparedEntryArrival(destination);
-        boolean waitingOnEntryWarmup = preparedTarget.isEmpty()
-            && LiveDimensionInstantiator.isRuntimeLevel(destination)
-            && !LiveDimensionInstantiator.isReadyForEntry(destination);
+        if (preparedTarget.isPresent()) {
+            net.minecraft.world.level.ChunkPos targetChunk = new net.minecraft.world.level.ChunkPos(BlockPos.containing(preparedTarget.get()));
+            if (destination.getChunkSource().isPositionTicking(targetChunk.toLong())) {
+                return true;
+            }
+
+            return sourceLevel.getServer().getPlayerList().getPlayers().stream()
+                .anyMatch(player -> VerseDimensionRuntimeHooks.hasReadyHyperBookTeleport(player, destination, preparedTarget.get()));
+        }
+
         boolean waitingOnPreparedEntry = !savedTarget.isPresent() && !VerseDimensionRuntimeHooks.isPreparedEntryReady(destination);
-        return !waitingOnEntryWarmup && !waitingOnPreparedEntry && preparedTarget.isPresent();
+        return !waitingOnPreparedEntry && preparedTarget.isPresent();
+    }
+
+    private static boolean queuePendingLecternTargetWarmup(ServerLevel sourceLevel, BlockPos lecternPos, PendingLecternWarmup pending, ServerLevel destination) {
+        if (!(sourceLevel.getBlockEntity(lecternPos) instanceof LecternBlockEntity lectern) || !lecternHasStoredBook(lectern)) {
+            return false;
+        }
+
+        Optional<HyperBookData> data = getLecternHyperBookData(lectern);
+        if (data.isEmpty() || !data.get().dimensionId().equals(pending.destinationId())) {
+            return false;
+        }
+
+        Optional<Vec3> savedTarget = data.get().targetPosition();
+        Optional<Vec3> preparedTarget = savedTarget.isPresent() ? savedTarget : VerseDimensionRuntimeHooks.preparedEntryArrival(destination);
+        if (preparedTarget.isEmpty()) {
+            return false;
+        }
+
+        Vec3 target = preparedTarget.get();
+        boolean hasOnlinePlayer = false;
+        boolean allTargetsReady = true;
+        for (UUID playerId : pending.playerIds()) {
+            ServerPlayer player = sourceLevel.getServer().getPlayerList().getPlayer(playerId);
+            if (player == null) {
+                continue;
+            }
+
+            hasOnlinePlayer = true;
+            float targetYRot = data.get().targetYRot() != null ? data.get().targetYRot() : player.getYRot();
+            float targetXRot = data.get().targetXRot() != null ? data.get().targetXRot() : player.getXRot();
+            allTargetsReady &= VerseDimensionRuntimeHooks.ensureHyperBookTargetWarmup(player, destination, target, targetYRot, targetXRot, false);
+        }
+
+        return hasOnlinePlayer && allTargetsReady;
     }
 
     private static ServerLevel findExistingDestination(MinecraftServer server, ResourceLocation dimensionId) {
@@ -2031,18 +2304,37 @@ public final class HyperBookRitualHooks {
             && LiveDimensionInstantiator.isRuntimeLevel(destination)
             && !LiveDimensionInstantiator.isReadyForEntry(destination);
         boolean waitingOnPreparedEntry = !savedTarget.isPresent() && !VerseDimensionRuntimeHooks.isPreparedEntryReady(destination);
-        boolean lecternWaitingForReadyClick = lecternPos != null && !isLecternTeleportReady(sourceLevel, lecternPos, data.dimensionId());
-        if (waitingOnEntryWarmup || waitingOnPreparedEntry || !preparedTarget.isPresent() || lecternWaitingForReadyClick) {
+        boolean hasReadyTargetWarmup = preparedTarget.isPresent()
+            && VerseDimensionRuntimeHooks.hasReadyHyperBookTeleport(player, destination, preparedTarget.get());
+        boolean waitingOnTargetWarmup = preparedTarget.isPresent()
+            && !hasReadyTargetWarmup
+            && !destination.getChunkSource().isPositionTicking(new net.minecraft.world.level.ChunkPos(BlockPos.containing(preparedTarget.get())).toLong());
+        boolean destinationStillWarming = waitingOnEntryWarmup || waitingOnPreparedEntry || waitingOnTargetWarmup || preparedTarget.isEmpty();
+        boolean lecternWaitingForReadyClick = lecternPos != null && destinationStillWarming && !isLecternTeleportReady(sourceLevel, lecternPos, data.dimensionId());
+        if (waitingOnEntryWarmup || waitingOnPreparedEntry || waitingOnTargetWarmup || !preparedTarget.isPresent() || lecternWaitingForReadyClick) {
             VerseWorks.LOGGER.info(
-                "Hyperbook use for {} is waiting. destination={}, lecternPos={}, waitingOnEntryWarmup={}, waitingOnPreparedEntry={}, hasPreparedTarget={}, lecternWaitingForReadyClick={}",
+                "Hyperbook use for {} is waiting. destination={}, lecternPos={}, waitingOnEntryWarmup={}, waitingOnPreparedEntry={}, waitingOnTargetWarmup={}, hasPreparedTarget={}, lecternWaitingForReadyClick={}",
                 player.getGameProfile().getName(),
                 data.dimensionId(),
                 lecternPos,
                 waitingOnEntryWarmup,
                 waitingOnPreparedEntry,
+                waitingOnTargetWarmup,
                 preparedTarget.isPresent(),
                 lecternWaitingForReadyClick
             );
+            if (waitingOnTargetWarmup && preparedTarget.isPresent()) {
+                float targetYRot = data.targetYRot() != null ? data.targetYRot() : player.getYRot();
+                float targetXRot = data.targetXRot() != null ? data.targetXRot() : player.getXRot();
+                Vec3 target = preparedTarget.get();
+                if (savedTarget.isEmpty()) {
+                    data = persistResolvedTarget(sourceLevel, lecternPos, heldStack, data, target, targetYRot, targetXRot);
+                }
+                if (VerseDimensionRuntimeHooks.queueHyperBookTeleport(player, destination, target, targetYRot, targetXRot)) {
+                    startQueuedHyperBookWarmup(sourceLevel, player, lecternPos, data.dimensionId());
+                    return true;
+                }
+            }
             if (lecternPos != null) {
                 startLecternHyperBookTunneling(sourceLevel, player, lecternPos, data.dimensionId());
             } else {
@@ -2068,8 +2360,8 @@ public final class HyperBookRitualHooks {
                 data = persistResolvedTarget(sourceLevel, lecternPos, heldStack, data, target, targetYRot, targetXRot);
             }
             VerseWorks.LOGGER.info("Hyperbook use for {} resolved destination {} with target {}", player.getGameProfile().getName(), data.dimensionId(), target);
-            if (lecternPos == null && VerseDimensionRuntimeHooks.queueHyperBookTeleport(player, destination, target, targetYRot, targetXRot)) {
-                startQueuedHyperBookWarmup(sourceLevel, player, null, data.dimensionId());
+            if (!hasReadyTargetWarmup && VerseDimensionRuntimeHooks.queueHyperBookTeleport(player, destination, target, targetYRot, targetXRot)) {
+                startQueuedHyperBookWarmup(sourceLevel, player, lecternPos, data.dimensionId());
                 VerseWorks.LOGGER.info("Queued warmup-based Hyperbook teleport for {} to {}", player.getGameProfile().getName(), data.dimensionId());
                 return true;
             }
@@ -2225,6 +2517,13 @@ public final class HyperBookRitualHooks {
 
     private static ServerLevel resolveDestination(MinecraftServer server, ResourceLocation dimensionId, ServerPlayer player, BlockPos lecternPos, boolean notifyPlayer) {
         long activationStartedAt = System.nanoTime();
+        if (HyperBookCollapseHooks.isDimensionCollapsing(dimensionId)) {
+            if (notifyPlayer) {
+                player.sendSystemMessage(Component.literal("That Hyper Book is no longer linked to an available dimension.").withStyle(ChatFormatting.RED));
+            }
+            return null;
+        }
+
         ServerLevel liveLevel = LiveDimensionInstantiator.findLevel(server, dimensionId).orElse(null);
         if (liveLevel != null) {
             if (lecternPos == null) {
@@ -2396,13 +2695,24 @@ public final class HyperBookRitualHooks {
         private boolean preventSpheres;
         private boolean preventAllCorruptions;
         private boolean explicitGravity;
+        private boolean explicitMobSpawns;
         private double oreMultiplier = 1.0D;
+        private double mobSpawnMultiplier = 1.0D;
+        private boolean cavesEnabled = true;
+        private boolean chasmsEnabled = true;
         private boolean spheres;
         private ResourceLocation fluidId;
         private boolean lakes;
         private Integer oceanLevel;
         private boolean structures;
         private boolean structuresExplicitlySet;
+        private VerseDimensionParameters.StructureControlProfile structureControl = VerseDimensionParameters.StructureControlProfile.DEFAULT;
+        private List<VerseDimensionParameters.ShapeFeatureSpec> shapeFeatures = List.of();
+        private List<VerseDimensionParameters.PoolFeatureSpec> poolFeatures = List.of();
+        private List<VerseDimensionParameters.OreMorphSpec> oreMorphFeatures = List.of();
+        private VerseDimensionParameters.SurfaceProfile surfaceProfile = VerseDimensionParameters.SurfaceProfile.DEFAULT;
+        private VerseDimensionParameters.SkyProfile skyProfile = VerseDimensionParameters.SkyProfile.DEFAULT;
+        private boolean crystalClusters;
         private final List<VerseDimensionCorruption> corruptions = new ArrayList<>();
     }
 }

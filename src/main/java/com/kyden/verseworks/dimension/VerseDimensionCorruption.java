@@ -14,7 +14,8 @@ public enum VerseDimensionCorruption {
     WARP("warp", "warp has found its way in"),
     FIXED_TIME("fixed_time", "time doesn't pass"),
     GRAVITY("gravity", "gravity feels wrong"),
-    SPHERES("spheres", "strange spheres drift through the world");
+    SPHERES("spheres", "strange spheres drift through the world"),
+    HOSTILE_HORDES("hostile_hordes", "monsters gather in unusual numbers");
 
     public static final Codec<VerseDimensionCorruption> CODEC = Codec.STRING.comapFlatMap(
         value -> fromId(value)

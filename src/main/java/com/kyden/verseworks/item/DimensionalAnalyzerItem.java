@@ -104,6 +104,9 @@ public final class DimensionalAnalyzerItem extends Item {
 
         serverPlayer.sendSystemMessage(header);
         serverPlayer.sendSystemMessage(summary);
+        parameters.map(VerseDimensionParameters::rulesSummary)
+            .map(rules -> Component.literal("Rules: " + rules).withStyle(ChatFormatting.DARK_AQUA))
+            .ifPresent(serverPlayer::sendSystemMessage);
         serverPlayer.sendSystemMessage(corruptionStatus);
         for (VerseDimensionCorruption corruption : VerseDimensionCorruption.values()) {
             boolean present = parameters
@@ -137,6 +140,7 @@ public final class DimensionalAnalyzerItem extends Item {
             case FIXED_TIME -> "Endless Time";
             case GRAVITY -> "Gravity";
             case SPHERES -> "Spheres";
+            case HOSTILE_HORDES -> "Hostile Hordes";
         };
     }
 

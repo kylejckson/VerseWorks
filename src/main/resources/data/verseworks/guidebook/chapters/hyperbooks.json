@@ -1,0 +1,28 @@
+{
+  "id": "hyperbooks",
+  "title_key": "guidebook.chapter.hyperbooks.title",
+  "summary_key": "guidebook.chapter.hyperbooks.summary",
+  "sort_order": 4,
+  "icon": {
+    "type": "item",
+    "value": "verseworks:hyper_book"
+  },
+  "pages": [
+    {
+      "type": "text",
+      "title_key": "guidebook.entry.hyperbooks_linked.title",
+      "body_keys": [
+        "guidebook.entry.hyperbooks_linked.body.1",
+        "guidebook.entry.hyperbooks_linked.body.2"
+      ]
+    },
+    {
+      "type": "image",
+      "title_key": "guidebook.entry.hyperbooks_lectern.title",
+      "body_keys": [
+        "guidebook.entry.hyperbooks_lectern.body.1"
+      ],
+      "image": "verseworks:textures/gui/guidebook/images/lectern_setup.png"
+    }
+  ]
+}

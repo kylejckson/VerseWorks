@@ -2,13 +2,16 @@ package com.kyden.verseworks.command;
 
 import com.kyden.verseworks.VerseWorks;
 import com.kyden.verseworks.dimension.GeneratedDimensionPackWriter;
+import com.kyden.verseworks.dimension.HyperBookCollapseHooks;
 import com.kyden.verseworks.dimension.LiveDimensionInstantiator;
 import com.kyden.verseworks.dimension.VerseDimensionCatalog;
 import com.kyden.verseworks.dimension.VerseDimensionParameters;
 import com.kyden.verseworks.dimension.VerseDimensionRuntimeHooks;
+import com.kyden.verseworks.dimension.VerseStructureGroups;
 import com.kyden.verseworks.dimension.VerseDimensionWorldType;
 import com.kyden.verseworks.entity.MeteorEntity;
 import com.kyden.verseworks.item.HyperBookData;
+import com.kyden.verseworks.item.VerseEffects;
 import com.kyden.verseworks.item.VerseItems;
 import com.kyden.verseworks.ritual.HyperBookRitualHooks;
 import com.kyden.verseworks.util.VerseText;
@@ -116,7 +119,9 @@ public final class VerseWorksCommands {
         "endlessstorm", "endless_storm", "permanent_storm", "meteorshowers", "meteor_showers",
         "spawnwarp", "spawn_warp",
         "oremult", "ore_multiplier", "ores",
-        "spheres", "sphereblock", "sphere_block", "sphere_material", "fluid", "lakes", "ocean", "oceanlevel", "ocean_level", "structures"
+        "spheres", "sphereblock", "sphere_block", "sphere_material", "fluid", "lakes", "ocean", "oceanlevel", "ocean_level", "structures",
+        "mobspawns", "mob_spawns", "mobspawnmultiplier", "mob_spawn_multiplier", "caves", "chasms",
+        "structuregroup", "shape", "pool", "surface", "crystals"
     );
 
     private VerseWorksCommands() {
@@ -137,7 +142,7 @@ public final class VerseWorksCommands {
                                     context -> enterDimension(
                                         context,
                                         java.util.List.of(context.getSource().getEntityOrException()),
-                                        resolveDestination(context.getSource(), ResourceLocationArgument.getId(context, "dimension"))
+                                        ResourceLocationArgument.getId(context, "dimension")
                                     )
                                 )
                                 .then(
@@ -146,7 +151,7 @@ public final class VerseWorksCommands {
                                             context -> enterDimension(
                                                 context,
                                                 EntityArgument.getEntities(context, "targets"),
-                                                resolveDestination(context.getSource(), ResourceLocationArgument.getId(context, "dimension"))
+                                                ResourceLocationArgument.getId(context, "dimension")
                                             )
                                         )
                                 )
@@ -512,38 +517,55 @@ public final class VerseWorksCommands {
             options.lakes,
             options.oceanLevel,
             options.structures,
+            options.mobSpawnMultiplier,
+            options.cavesEnabled,
+            options.chasmsEnabled,
+            options.structureControl,
+            options.shapeFeatures,
+            options.poolFeatures,
+            options.oreMorphFeatures,
+            options.surfaceProfile,
+            options.skyProfile,
+            options.crystalClusters,
             List.of(),
             0L
         );
     }
 
     private static VerseDimensionParameters ensureDebugDimension(MinecraftServer server, DebugDimensionDefinition definition) throws CommandSyntaxException {
-        VerseDimensionParameters existing = VerseDimensionCatalog.get(server, definition.dimensionId()).orElse(null);
-        if (existing != null) {
-            return existing;
-        }
-
+        CreateOptions options = new CreateOptions();
+        applyDebugDefinition(definition, options);
         VerseDimensionParameters parameters = new VerseDimensionParameters(
             DEFAULT_SKY_COLOR,
-            Blocks.GRASS_BLOCK,
+            options.floorBlock,
             null,
             definition.worldType(),
             List.of(ResourceLocation.withDefaultNamespace("plains")),
-            1.0D,
-            1.0D,
-            null,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            1.0D,
-            false,
-            null,
-            false,
-            null,
-            false,
+            options.gravityScale,
+            options.dayRate,
+            options.timeOfDay,
+            options.permanentTime,
+            options.permanentRain,
+            options.permanentLightning,
+            options.permanentStorm,
+            options.meteorShowers,
+            options.spawnWarp,
+            options.oreMultiplier,
+            options.spheres,
+            options.fluidId,
+            options.lakes,
+            options.oceanLevel,
+            options.structures,
+            options.mobSpawnMultiplier,
+            options.cavesEnabled,
+            options.chasmsEnabled,
+            options.structureControl,
+            options.shapeFeatures,
+            options.poolFeatures,
+            options.oreMorphFeatures,
+            options.surfaceProfile,
+            options.skyProfile,
+            options.crystalClusters,
             List.of(),
             GeneratedDimensionPackWriter.defaultSeedOffset(definition.dimensionId())
         );
@@ -562,9 +584,21 @@ public final class VerseWorksCommands {
             new DebugDimensionDefinition(ResourceLocation.fromNamespaceAndPath(VerseWorks.MODID, "debug_flat"), "Debug Flat", VerseDimensionWorldType.FLAT),
             new DebugDimensionDefinition(ResourceLocation.fromNamespaceAndPath(VerseWorks.MODID, "debug_void"), "Debug Void", VerseDimensionWorldType.VOID),
             new DebugDimensionDefinition(ResourceLocation.fromNamespaceAndPath(VerseWorks.MODID, "debug_sky"), "Debug Sky", VerseDimensionWorldType.SKY_ISLAND),
+            new DebugDimensionDefinition(ResourceLocation.fromNamespaceAndPath(VerseWorks.MODID, "debug_crystal"), "Debug Crystal", VerseDimensionWorldType.NORMAL),
             new DebugDimensionDefinition(ResourceLocation.fromNamespaceAndPath(VerseWorks.MODID, "debug_normal"), "Debug Normal", VerseDimensionWorldType.NORMAL),
             new DebugDimensionDefinition(ResourceLocation.fromNamespaceAndPath(VerseWorks.MODID, "debug_amplified"), "Debug Amplified", VerseDimensionWorldType.AMPLIFIED)
         );
+    }
+
+    private static void applyDebugDefinition(DebugDimensionDefinition definition, CreateOptions options) {
+        switch (definition.dimensionId().getPath()) {
+            case "debug_crystal" -> {
+                options.crystalClusters = true;
+                options.structures = false;
+            }
+            default -> {
+            }
+        }
     }
 
     private static ItemStack createDebugHyperBook(ResourceLocation dimensionId, String dimensionName) {
@@ -647,6 +681,14 @@ public final class VerseWorksCommands {
             case "lakes" -> options.lakes = parseBoolean(value);
             case "ocean", "oceanlevel", "ocean_level" -> options.oceanLevel = parseInt(value, -64, 320, "ocean level");
             case "structures" -> options.structures = parseBoolean(value);
+            case "structuregroup" -> applyStructureGroup(options, value);
+            case "shape" -> options.shapeFeatures = List.of(parseShapeFeature(value));
+            case "pool" -> options.poolFeatures = List.of(parsePoolFeature(value));
+            case "surface" -> options.surfaceProfile = parseSurfaceProfile(value);
+            case "crystals" -> options.crystalClusters = parseBoolean(value);
+            case "mobspawns", "mob_spawns", "mobspawnmultiplier", "mob_spawn_multiplier" -> options.mobSpawnMultiplier = parseMobSpawnMultiplier(value);
+            case "caves" -> options.cavesEnabled = parseBoolean(value);
+            case "chasms" -> options.chasmsEnabled = parseBoolean(value);
             default -> throw INVALID_OPTION.create("Unknown option '" + rawKey + "'");
         }
 
@@ -681,6 +723,50 @@ public final class VerseWorksCommands {
         }
     }
 
+    private static void applyStructureGroup(CreateOptions options, String value) throws CommandSyntaxException {
+        String normalized = value.toLowerCase(Locale.ROOT);
+        if (normalized.equals("none")) {
+            options.structureControl = new VerseDimensionParameters.StructureControlProfile(VerseDimensionParameters.StructureControlMode.NONE, List.of(), List.of(), List.of(), List.of());
+            options.structures = false;
+            return;
+        }
+        if (!VerseStructureGroups.knownGroups().contains(normalized)) {
+            throw INVALID_OPTION.create("Unknown structure group '" + value + "'");
+        }
+        options.structureControl = new VerseDimensionParameters.StructureControlProfile(VerseDimensionParameters.StructureControlMode.ALLOWLIST, List.of(normalized), List.of(), List.of(), List.of());
+        options.structures = true;
+    }
+
+    private static VerseDimensionParameters.ShapeFeatureSpec parseShapeFeature(String value) throws CommandSyntaxException {
+        String[] parts = value.split("\\|", 2);
+        if (parts.length != 2) {
+            throw INVALID_OPTION.create("Shape format must be sphere|<block> or cube|<block>");
+        }
+        VerseDimensionParameters.ShapeKind shapeKind = VerseDimensionParameters.ShapeKind.parse(parts[0]);
+        return new VerseDimensionParameters.ShapeFeatureSpec(
+            shapeKind,
+            parseBlock(parts[1]),
+            shapeKind == VerseDimensionParameters.ShapeKind.CUBE ? 2 : 5,
+            shapeKind == VerseDimensionParameters.ShapeKind.CUBE ? 3 : 9,
+            shapeKind == VerseDimensionParameters.ShapeKind.CUBE ? 0.01D : 0.025D,
+            new VerseDimensionParameters.HeightDistribution("surface"),
+            false
+        );
+    }
+
+    private static VerseDimensionParameters.PoolFeatureSpec parsePoolFeature(String value) throws CommandSyntaxException {
+        ResourceLocation fluidId = parseResourceLocation(value, "pool fluid");
+        var fluid = BuiltInRegistries.FLUID.getOptional(fluidId).orElseThrow(() -> INVALID_OPTION.create("Unknown fluid '" + fluidId + "'"));
+        if (fluid.defaultFluidState().createLegacyBlock().isAir()) {
+            throw INVALID_OPTION.create("Fluid '" + fluidId + "' cannot be placed as a world block");
+        }
+        return new VerseDimensionParameters.PoolFeatureSpec(fluidId, 6, 3, 0.0325D);
+    }
+
+    private static VerseDimensionParameters.SurfaceProfile parseSurfaceProfile(String value) throws CommandSyntaxException {
+        return VerseDimensionParameters.SurfaceProfile.fromBlock(parseBlock(value));
+    }
+
     private static <T> boolean hasArgument(CommandContext<CommandSourceStack> context, String name, Class<T> type) {
         try {
             context.getArgument(name, type);
@@ -707,6 +793,10 @@ public final class VerseWorksCommands {
 
     private static ServerLevel resolveDestination(CommandSourceStack source, ResourceLocation dimensionId) throws CommandSyntaxException {
         MinecraftServer server = source.getServer();
+        if (HyperBookCollapseHooks.isDimensionCollapsing(dimensionId)) {
+            throw UNKNOWN_DIMENSION.create(dimensionId + " is collapsing");
+        }
+
         ServerLevel loadedLevel = LiveDimensionInstantiator.findLevel(server, dimensionId).orElse(null);
         if (loadedLevel != null) {
             VerseDimensionRuntimeHooks.ensureEntryPreparationScheduled(server, loadedLevel);
@@ -742,17 +832,54 @@ public final class VerseWorksCommands {
         return exception.getRawMessage() != null ? exception.getRawMessage().getString() : exception.getMessage();
     }
 
+    private static int enterDimension(CommandContext<CommandSourceStack> context, Collection<? extends Entity> targets, ResourceLocation dimensionId) throws CommandSyntaxException {
+        CommandSourceStack source = context.getSource();
+        MinecraftServer server = source.getServer();
+        if (HyperBookCollapseHooks.isDimensionCollapsing(dimensionId)) {
+            throw UNKNOWN_DIMENSION.create(dimensionId + " is collapsing");
+        }
+
+        ServerLevel destination = LiveDimensionInstantiator.findLevel(server, dimensionId).orElse(null);
+        if (destination == null) {
+            destination = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimensionId));
+        }
+        if (destination != null) {
+            VerseDimensionRuntimeHooks.ensureEntryPreparationScheduled(server, destination);
+            return enterDimension(context, targets, destination);
+        }
+
+        VerseDimensionParameters parameters = VerseDimensionCatalog.get(server, dimensionId)
+            .orElseThrow(() -> UNKNOWN_DIMENSION.create(dimensionId));
+        CompletableFuture<LiveDimensionInstantiator.Result> activationFuture = LiveDimensionInstantiator.activateAsync(server, dimensionId, parameters);
+        for (Entity target : targets) {
+            queueCommandEntryAfterActivation(target, activationFuture, dimensionId);
+        }
+
+        sendQueuedEnterMessage(context, targets, dimensionId, "activating in the background");
+        return targets.size();
+    }
+
     private static int enterDimension(CommandContext<CommandSourceStack> context, Collection<? extends Entity> targets, ServerLevel destination) throws CommandSyntaxException {
-        if (LiveDimensionInstantiator.isRuntimeLevel(destination) && !VerseDimensionRuntimeHooks.hasPendingEntryPreparation(destination)) {
+        boolean pendingEntryPreparation = VerseDimensionRuntimeHooks.hasPendingEntryPreparation(destination);
+        if (LiveDimensionInstantiator.isRuntimeLevel(destination)
+            && !pendingEntryPreparation
+            && !LiveDimensionInstantiator.isReadyForEntry(destination)) {
             LiveDimensionInstantiator.requestEntryWarmup(destination);
         }
 
-        if (LiveDimensionInstantiator.isRuntimeLevel(destination) && !LiveDimensionInstantiator.isReadyForEntry(destination)) {
-            throw LIVE_DIMENSION_NOT_READY.create(
-                destination.dimension().location() + " is still warming its entry area; "
-                    + LiveDimensionInstantiator.warmupDetail(destination.dimension())
-                    + ". Try /verseworks enter again in a moment"
+        if (pendingEntryPreparation || (LiveDimensionInstantiator.isRuntimeLevel(destination) && !LiveDimensionInstantiator.isReadyForEntry(destination))) {
+            for (Entity target : targets) {
+                VerseDimensionRuntimeHooks.queueCommandEntry(target, destination);
+            }
+            sendQueuedEnterMessage(
+                context,
+                targets,
+                destination.dimension().location(),
+                pendingEntryPreparation
+                    ? "is still preparing its entry area"
+                    : "is still warming its entry area; " + LiveDimensionInstantiator.warmupDetail(destination.dimension())
             );
+            return targets.size();
         }
 
         int moved = 0;
@@ -775,6 +902,54 @@ public final class VerseWorksCommands {
             context.getSource().sendSuccess(() -> Component.literal(String.format(Locale.ROOT, "Teleported %d entities to %s", movedCount, dimensionName)), true);
         }
         return movedCount;
+    }
+
+    private static void queueCommandEntryAfterActivation(Entity target, CompletableFuture<LiveDimensionInstantiator.Result> activationFuture, ResourceLocation dimensionId) {
+        activationFuture.whenComplete((result, throwable) -> {
+            MinecraftServer server = target.getServer();
+            if (server == null) {
+                return;
+            }
+
+            server.execute(() -> {
+                if (target.isRemoved()) {
+                    return;
+                }
+
+                if (throwable != null) {
+                    Throwable cause = throwable instanceof java.util.concurrent.CompletionException completionException && completionException.getCause() != null
+                        ? completionException.getCause()
+                        : throwable;
+                    if (target instanceof ServerPlayer player) {
+                        player.sendSystemMessage(Component.literal(
+                            "Queued entry into " + dimensionId + " failed: " + (cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage())
+                        ));
+                    }
+                    return;
+                }
+
+                ServerLevel destination = result.level();
+                VerseDimensionRuntimeHooks.ensureEntryPreparationScheduled(server, destination);
+                VerseDimensionRuntimeHooks.queueCommandEntry(target, destination);
+            });
+        });
+    }
+
+    private static void sendQueuedEnterMessage(CommandContext<CommandSourceStack> context, Collection<? extends Entity> targets, ResourceLocation dimensionId, String detail) {
+        int count = targets.size();
+        if (count == 1) {
+            Entity target = targets.iterator().next();
+            context.getSource().sendSuccess(
+                () -> Component.literal("Queued " + target.getName().getString() + " for teleport to " + dimensionId + " once it is ready (" + detail + ")"),
+                true
+            );
+            return;
+        }
+
+        context.getSource().sendSuccess(
+            () -> Component.literal(String.format(Locale.ROOT, "Queued %d entities for teleport to %s once it is ready (%s)", count, dimensionId, detail)),
+            true
+        );
     }
 
     private static int checkBiome(CommandContext<CommandSourceStack> context, Collection<? extends Entity> targets) {
@@ -913,9 +1088,10 @@ public final class VerseWorksCommands {
 
     private static void teleport(Entity target, ServerLevel destination) {
         Vec3 arrival = VerseDimensionRuntimeHooks.findSafeArrival(destination);
-        target.teleportTo(destination, arrival.x(), arrival.y(), arrival.z(), Set.<RelativeMovement>of(), target.getYRot(), target.getXRot());
+        boolean crossDimensionEntry = target.level() != destination;
+        VerseDimensionRuntimeHooks.teleportWithVerseEntryAuthorization(target, destination, arrival, target.getYRot(), target.getXRot());
         if (target instanceof net.minecraft.server.level.ServerPlayer player) {
-            VerseDimensionRuntimeHooks.registerPendingPlayerEntry(player, destination, arrival);
+            VerseDimensionRuntimeHooks.registerPendingPlayerEntry(player, destination, arrival, crossDimensionEntry);
         }
     }
 
@@ -1030,6 +1206,17 @@ public final class VerseWorksCommands {
         }
     }
 
+    private static double parseMobSpawnMultiplier(String input) throws CommandSyntaxException {
+        return switch (input.toLowerCase(Locale.ROOT)) {
+            case "off" -> 0.0D;
+            case "half" -> 0.5D;
+            case "normal" -> 1.0D;
+            case "double" -> 2.0D;
+            case "triple" -> 3.0D;
+            default -> parseDouble(input, 0.0D, 3.0D, "mob spawns");
+        };
+    }
+
     private static final class CreateOptions {
         private int skyColor = DEFAULT_SKY_COLOR;
         private Block floorBlock = Blocks.GRASS_BLOCK;
@@ -1051,6 +1238,16 @@ public final class VerseWorksCommands {
         private boolean lakes;
         private Integer oceanLevel;
         private boolean structures;
+        private double mobSpawnMultiplier = 1.0D;
+        private boolean cavesEnabled = true;
+        private boolean chasmsEnabled = true;
+        private VerseDimensionParameters.StructureControlProfile structureControl = VerseDimensionParameters.StructureControlProfile.DEFAULT;
+        private List<VerseDimensionParameters.ShapeFeatureSpec> shapeFeatures = List.of();
+        private List<VerseDimensionParameters.PoolFeatureSpec> poolFeatures = List.of();
+        private List<VerseDimensionParameters.OreMorphSpec> oreMorphFeatures = List.of();
+        private VerseDimensionParameters.SurfaceProfile surfaceProfile = VerseDimensionParameters.SurfaceProfile.DEFAULT;
+        private VerseDimensionParameters.SkyProfile skyProfile = VerseDimensionParameters.SkyProfile.DEFAULT;
+        private boolean crystalClusters;
         private final Set<String> seenKeys = new HashSet<>();
     }
 

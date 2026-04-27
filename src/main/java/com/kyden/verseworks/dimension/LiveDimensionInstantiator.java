@@ -126,10 +126,14 @@ public final class LiveDimensionInstantiator {
             return false;
         }
 
+        return hasLoadedEntryChunkRing(level);
+    }
+
+    private static boolean hasLoadedEntryChunkRing(ServerLevel level) {
         ChunkPos entryChunk = getEntryChunk(level);
         for (int chunkX = entryChunk.x - ENTRY_WARMUP_RADIUS; chunkX <= entryChunk.x + ENTRY_WARMUP_RADIUS; chunkX++) {
             for (int chunkZ = entryChunk.z - ENTRY_WARMUP_RADIUS; chunkZ <= entryChunk.z + ENTRY_WARMUP_RADIUS; chunkZ++) {
-                if (level.getChunkSource().getChunkNow(chunkX, chunkZ) == null) {
+                if (!level.getChunkSource().isPositionTicking(ChunkPos.asLong(chunkX, chunkZ))) {
                     return false;
                 }
             }
@@ -158,6 +162,10 @@ public final class LiveDimensionInstantiator {
             return;
         }
 
+        if (hasLoadedEntryChunkRing(level)) {
+            return;
+        }
+
         scheduleInitialChunkWarmup(level);
     }
 
@@ -166,6 +174,10 @@ public final class LiveDimensionInstantiator {
     }
 
     public static CompletableFuture<Result> activateAsync(MinecraftServer server, ResourceLocation dimensionId, VerseDimensionParameters parameters, ActivationMode activationMode) {
+        if (HyperBookCollapseHooks.isDimensionCollapsing(dimensionId)) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Dimension " + dimensionId + " is collapsing"));
+        }
+
         if (VerseDimensionRuntimeHooks.isShutdownInProgress(server)) {
             ServerLevel overworld = server.getLevel(Level.OVERWORLD);
             if (overworld == null) {
@@ -205,6 +217,11 @@ public final class LiveDimensionInstantiator {
                     }
 
                     server.execute(() -> {
+                        if (HyperBookCollapseHooks.isDimensionCollapsing(dimensionId)) {
+                            future.completeExceptionally(new IllegalStateException("Dimension " + dimensionId + " is collapsing"));
+                            return;
+                        }
+
                         long instantiateStart = System.nanoTime();
                         try {
                             Result result = instantiatePrepared(prepared, activationMode);
@@ -290,6 +307,10 @@ public final class LiveDimensionInstantiator {
             return;
         }
 
+        if (hasLoadedEntryChunkRing(level)) {
+            return;
+        }
+
         ServerChunkCache chunkSource = level.getChunkSource();
         ResourceKey<Level> levelKey = level.dimension();
         ChunkPos entryChunk = getEntryChunk(level);
@@ -307,14 +328,14 @@ public final class LiveDimensionInstantiator {
                 return;
             }
 
-            LevelChunk loadedChunk = chunkSource.getChunkNow(entryChunk.x, entryChunk.z);
+            boolean entryChunkTicking = chunkSource.isPositionTicking(entryChunk.toLong());
             VerseWorks.LOGGER.info(
-                "Live warmup completed for {} around chunk {},{} radius {} (loaded={})",
+                "Live warmup completed for {} around chunk {},{} radius {} (entityTicking={})",
                 level.dimension().location(),
                 entryChunk.x,
                 entryChunk.z,
                 ENTRY_WARMUP_RADIUS,
-                loadedChunk != null
+                entryChunkTicking
             );
             WARMUP_FUTURES.remove(levelKey, loadFuture);
         });
@@ -390,6 +411,29 @@ public final class LiveDimensionInstantiator {
         return server.registryAccess().registryOrThrow(Registries.LEVEL_STEM).containsKey(stemKey);
     }
 
+    public static boolean unregisterLevelStem(MinecraftServer server, ResourceLocation dimensionId) throws Exception {
+        ResourceKey<LevelStem> stemKey = ResourceKey.create(Registries.LEVEL_STEM, dimensionId);
+        Registry<LevelStem> levelStemRegistry = server.registryAccess().registryOrThrow(Registries.LEVEL_STEM);
+        if (!levelStemRegistry.containsKey(stemKey)) {
+            return false;
+        }
+
+        WorldDimensions currentDimensions = new WorldDimensions(levelStemRegistry);
+        LinkedHashMap<ResourceKey<LevelStem>, LevelStem> updatedDimensions = new LinkedHashMap<>(currentDimensions.dimensions());
+        if (updatedDimensions.remove(stemKey) == null) {
+            return false;
+        }
+
+        WorldDimensions.Complete completeDimensions = new WorldDimensions(updatedDimensions).bake(levelStemRegistry);
+        var currentRegistries = server.registries();
+        var updatedRegistries = currentRegistries.replaceFrom(
+            RegistryLayer.DIMENSIONS,
+            List.of(completeDimensions.dimensionsRegistryAccess(), currentRegistries.getLayer(RegistryLayer.RELOADABLE))
+        );
+        getServerRegistriesField().set(server, updatedRegistries);
+        return !server.registryAccess().registryOrThrow(Registries.LEVEL_STEM).containsKey(stemKey);
+    }
+
     private static ChunkGenerator createGenerator(MinecraftServer server, ResourceLocation dimensionId, VerseDimensionParameters parameters, long dimensionSeed) {
         if (parameters.worldType() == VerseDimensionWorldType.FLAT) {
             return createFlatGenerator(server, parameters);
@@ -433,6 +477,11 @@ public final class LiveDimensionInstantiator {
 
     private static BiomeSource createBiomeSource(MinecraftServer server, VerseDimensionParameters parameters) {
         if (parameters.biomeIds().isEmpty()) {
+            ServerLevel overworld = server.overworld();
+            if (overworld != null) {
+                return overworld.getChunkSource().getGenerator().getBiomeSource();
+            }
+
             HolderGetter<MultiNoiseBiomeSourceParameterList> presetRegistry = server.registryAccess().lookupOrThrow(Registries.MULTI_NOISE_BIOME_SOURCE_PARAMETER_LIST);
             return MultiNoiseBiomeSource.createFromPreset(presetRegistry.getOrThrow(MultiNoiseBiomeSourceParameterLists.OVERWORLD));
         }

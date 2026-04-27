@@ -15,8 +15,10 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.dimension.DimensionType;
@@ -100,6 +102,7 @@ public final class GeneratedDimensionPackWriter {
     public static void deleteActiveDimension(MinecraftServer server, ResourceLocation dimensionId) {
         deleteIfExists(activeDimensionPath(server, dimensionId));
         deleteIfExists(activeDimensionTypePath(server, dimensionId));
+        deleteIfExists(legacyParameterPath(server, dimensionId));
     }
 
     public static void syncActiveDimensions(MinecraftServer server, java.util.Map<ResourceLocation, VerseDimensionParameters> startupDimensions) throws IOException {
@@ -177,6 +180,9 @@ public final class GeneratedDimensionPackWriter {
                 root.has("lakes") && root.get("lakes").getAsBoolean(),
                 root.has("ocean_level") && !root.get("ocean_level").isJsonNull() ? root.get("ocean_level").getAsInt() : null,
                 !root.has("structures") || root.get("structures").getAsBoolean(),
+                root.has("mob_spawn_multiplier") ? root.get("mob_spawn_multiplier").getAsDouble() : 1.0D,
+                !root.has("caves_enabled") || root.get("caves_enabled").getAsBoolean(),
+                !root.has("chasms_enabled") || root.get("chasms_enabled").getAsBoolean(),
                 root.has("corruptions") ? parseCorruptions(root.getAsJsonArray("corruptions")) : List.of(),
                 root.has("seed_offset") ? root.get("seed_offset").getAsLong() : defaultSeedOffset(dimensionId)
             );
@@ -403,7 +409,7 @@ public final class GeneratedDimensionPackWriter {
         return flatDimensionJson(server, dimensionId, parameters);
       }
 
-        return noiseDimensionJson(dimensionId, parameters);
+        return noiseDimensionJson(server, dimensionId, parameters);
     }
 
     private static String flatDimensionJson(MinecraftServer server, ResourceLocation dimensionId, VerseDimensionParameters parameters) {
@@ -418,13 +424,13 @@ public final class GeneratedDimensionPackWriter {
       return root.toString();
     }
 
-    private static String noiseDimensionJson(ResourceLocation dimensionId, VerseDimensionParameters parameters) {
+    private static String noiseDimensionJson(MinecraftServer server, ResourceLocation dimensionId, VerseDimensionParameters parameters) {
         JsonObject root = new JsonObject();
         root.addProperty("type", dimensionId.toString());
 
         JsonObject generator = new JsonObject();
         generator.addProperty("type", TERRAIN_GENERATOR_ID.toString());
-        generator.add("biome_source", JsonParser.parseString(biomeSourceJson(parameters)));
+        generator.add("biome_source", encodeBiomeSource(server, parameters));
         generator.addProperty("settings", parameters.worldType().noiseSettingsId());
         generator.add("verseworks", encodeParameters(parameters));
 
@@ -432,23 +438,33 @@ public final class GeneratedDimensionPackWriter {
         return root.toString();
     }
 
-    private static String biomeSourceJson(VerseDimensionParameters parameters) {
+    private static JsonElement encodeBiomeSource(MinecraftServer server, VerseDimensionParameters parameters) {
         if (parameters.biomeIds().isEmpty()) {
-            return """
+            ServerLevel overworld = server.overworld();
+            if (overworld != null) {
+                BiomeSource biomeSource = overworld.getChunkSource().getGenerator().getBiomeSource();
+                RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, server.registryAccess());
+                Optional<JsonElement> encoded = BiomeSource.CODEC.encodeStart(ops, biomeSource).result();
+                if (encoded.isPresent()) {
+                    return encoded.get();
+                }
+            }
+
+            return JsonParser.parseString("""
                 {
                   "type": "minecraft:multi_noise",
                   "preset": "minecraft:overworld"
                 }
-                """;
+                """);
         }
 
         if (parameters.biomeIds().size() == 1) {
-            return """
+            return JsonParser.parseString("""
                 {
                   "type": "minecraft:fixed",
                   "biome": "%s"
                 }
-                """.formatted(parameters.primaryBiomeId());
+                """.formatted(parameters.primaryBiomeId()));
         }
 
         String entries = parameters.biomeBands().stream()
@@ -468,14 +484,14 @@ public final class GeneratedDimensionPackWriter {
                 """.formatted(band.minWeirdness(), band.maxWeirdness(), band.biomeId()))
             .collect(java.util.stream.Collectors.joining(",\n"));
 
-        return """
+        return JsonParser.parseString("""
             {
               "type": "minecraft:multi_noise",
               "biomes": [
             %s
               ]
             }
-            """.formatted(indent(entries, 4));
+            """.formatted(indent(entries, 4)));
     }
 
     private static String parametersJson(VerseDimensionParameters parameters) {

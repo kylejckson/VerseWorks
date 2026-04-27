@@ -34,7 +34,9 @@ import net.neoforged.neoforge.client.event.ViewportEvent;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @EventBusSubscriber(modid = VerseWorks.MODID, value = Dist.CLIENT, bus = EventBusSubscriber.Bus.GAME)
@@ -45,8 +47,12 @@ public final class VerseWorksClientEvents {
     private static final float VERSE_WHISPER_VOLUME = 0.65F;
     private static final int VERSE_WHISPER_ATTENUATION_DISTANCE = 20;
     private static final int VERSE_WHISPER_MIN_ENTITY_AGE_TICKS = 10;
+    private static final int VERSE_WHISPER_SCAN_INTERVAL_TICKS = 20;
     private static final RandomSource WHISPER_RANDOM = RandomSource.create();
-    private static final List<VerseWhisperSoundInstance> ACTIVE_VERSE_WHISPERS = new ArrayList<>();
+    private static final Map<Integer, VerseWhisperSoundInstance> ACTIVE_VERSE_WHISPERS = new LinkedHashMap<>();
+    private static List<ResourceLocation> cachedWhisperVariants = List.of();
+    private static int cachedWhisperManagerIdentity;
+    private static long nextWhisperScanTick;
 
     private VerseWorksClientEvents() {
     }
@@ -91,16 +97,23 @@ public final class VerseWorksClientEvents {
 
         if (minecraft.level == null || minecraft.player == null) {
             stopAllVerseWhispers();
+            nextWhisperScanTick = 0L;
             return;
         }
 
         pruneFinishedVerseWhispers(minecraft);
+        if (minecraft.level.getGameTime() < nextWhisperScanTick) {
+            return;
+        }
+
+        nextWhisperScanTick = minecraft.level.getGameTime() + VERSE_WHISPER_SCAN_INTERVAL_TICKS;
         spawnMissingVerseWhispers(minecraft);
     }
 
     @SubscribeEvent
     public static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
         stopAllVerseWhispers();
+        nextWhisperScanTick = 0L;
     }
 
     private static Optional<VerseDimensionParameters> resolveDimensionParameters(Minecraft minecraft) {
@@ -121,38 +134,54 @@ public final class VerseWorksClientEvents {
         if (originalFar <= 0.0F) {
             return;
         }
+        float fogDensityScale = VerseDimensionVisuals.fogDensityScale(parameters);
 
         if (usesBlackVoidSky(parameters)) {
             event.setNearPlaneDistance(0.0F);
-            event.setFarPlaneDistance(Math.min(originalFar * 0.25F, 24.0F));
+            event.setFarPlaneDistance(Math.min(originalFar * 0.25F, 24.0F) / fogDensityScale);
             event.setCanceled(true);
             return;
         }
 
         if (parameters.worldType().isVoid()) {
             event.setNearPlaneDistance(0.0F);
-            event.setFarPlaneDistance(Math.min(originalFar * 0.35F, 40.0F));
+            event.setFarPlaneDistance(Math.min(originalFar * 0.35F, 40.0F) / fogDensityScale);
             event.setCanceled(true);
             return;
         }
 
         if (isEndLikeDimension(parameters)) {
             event.setNearPlaneDistance(0.0F);
-            event.setFarPlaneDistance(Math.max(24.0F, originalFar * 0.6F));
+            event.setFarPlaneDistance(Math.max(24.0F, originalFar * 0.6F) / fogDensityScale);
+            event.setCanceled(true);
+            return;
+        }
+
+        if (usesAmbientCeilingFog(parameters)) {
+            event.setNearPlaneDistance(0.0F);
+            event.setFarPlaneDistance(Math.max(18.0F, Math.min(72.0F, originalFar * 0.42F)) / fogDensityScale);
             event.setCanceled(true);
             return;
         }
 
         if (parameters.worldType() == VerseDimensionWorldType.FLAT) {
             event.setNearPlaneDistance(0.0F);
-            event.setFarPlaneDistance(Math.max(48.0F, originalFar * 0.95F));
+            event.setFarPlaneDistance(Math.max(48.0F, originalFar * 0.95F) / fogDensityScale);
             event.setCanceled(true);
             return;
         }
 
         if (parameters.worldType() == VerseDimensionWorldType.SKY_ISLAND) {
             event.setNearPlaneDistance(0.0F);
-            event.setFarPlaneDistance(Math.max(32.0F, originalFar * 0.8F));
+            event.setFarPlaneDistance(Math.max(32.0F, originalFar * 0.8F) / fogDensityScale);
+            event.setCanceled(true);
+            return;
+        }
+
+        if (fogDensityScale != 1.0F) {
+            float forcedFar = Math.max(12.0F, originalFar / (fogDensityScale * fogDensityScale));
+            event.setNearPlaneDistance(Math.max(0.0F, forcedFar * 0.05F));
+            event.setFarPlaneDistance(forcedFar);
             event.setCanceled(true);
         }
     }
@@ -165,8 +194,13 @@ public final class VerseWorksClientEvents {
         return VerseDimensionVisuals.isEndLikeDimension(parameters);
     }
 
+    private static boolean usesAmbientCeilingFog(VerseDimensionParameters parameters) {
+        return VerseDimensionVisuals.usesAmbientCeilingFog(parameters);
+    }
+
     private static void pruneFinishedVerseWhispers(Minecraft minecraft) {
-        ACTIVE_VERSE_WHISPERS.removeIf(sound -> {
+        ACTIVE_VERSE_WHISPERS.entrySet().removeIf(entry -> {
+            VerseWhisperSoundInstance sound = entry.getValue();
             if (!sound.isFinished()) {
                 return false;
             }
@@ -179,21 +213,33 @@ public final class VerseWorksClientEvents {
     }
 
     private static void spawnMissingVerseWhispers(Minecraft minecraft) {
-        List<ResourceLocation> whisperVariants = discoverWhisperVariants(minecraft.getResourceManager());
+        if (minecraft.options.getSoundSourceVolume(SoundSource.AMBIENT) <= 0.0F) {
+            if (!ACTIVE_VERSE_WHISPERS.isEmpty()) {
+                stopAllVerseWhispers();
+            }
+            return;
+        }
+
+        List<ResourceLocation> whisperVariants = whisperVariants(minecraft.getResourceManager());
         if (whisperVariants.isEmpty()) {
             return;
         }
 
         AABB scanBounds = minecraft.player.getBoundingBox().inflate(VERSE_WHISPER_SCAN_RANGE, VERSE_WHISPER_VERTICAL_RANGE, VERSE_WHISPER_SCAN_RANGE);
         List<ItemEntity> verseItems = minecraft.level.getEntitiesOfClass(ItemEntity.class, scanBounds, VerseWorksClientEvents::isAudibleVerseEntity);
-        verseItems.sort(Comparator.comparingInt(ItemEntity::getId));
+        if (verseItems.size() > 1) {
+            verseItems.sort(Comparator.comparingInt(ItemEntity::getId));
+        }
         for (ItemEntity verseItem : verseItems) {
+            if (ACTIVE_VERSE_WHISPERS.containsKey(verseItem.getId())) {
+                continue;
+            }
             if (hasNearbyActiveWhisper(verseItem)) {
                 continue;
             }
 
             VerseWhisperSoundInstance sound = new VerseWhisperSoundInstance(verseItem, pickWhisperVariant(whisperVariants));
-            ACTIVE_VERSE_WHISPERS.add(sound);
+            ACTIVE_VERSE_WHISPERS.put(verseItem.getId(), sound);
             minecraft.getSoundManager().queueTickingSound(sound);
         }
     }
@@ -207,7 +253,7 @@ public final class VerseWorksClientEvents {
     private static boolean hasNearbyActiveWhisper(ItemEntity verseItem) {
         Vec3 versePos = verseItem.position();
         double mergeRadiusSqr = VERSE_WHISPER_MERGE_RADIUS * VERSE_WHISPER_MERGE_RADIUS;
-        for (VerseWhisperSoundInstance sound : ACTIVE_VERSE_WHISPERS) {
+        for (VerseWhisperSoundInstance sound : ACTIVE_VERSE_WHISPERS.values()) {
             if (sound.isFinished()) {
                 continue;
             }
@@ -219,6 +265,16 @@ public final class VerseWorksClientEvents {
             }
         }
         return false;
+    }
+
+    private static List<ResourceLocation> whisperVariants(ResourceManager resourceManager) {
+        int resourceManagerIdentity = System.identityHashCode(resourceManager);
+        if (resourceManagerIdentity != cachedWhisperManagerIdentity) {
+            cachedWhisperVariants = discoverWhisperVariants(resourceManager);
+            cachedWhisperManagerIdentity = resourceManagerIdentity;
+        }
+
+        return cachedWhisperVariants;
     }
 
     private static List<ResourceLocation> discoverWhisperVariants(ResourceManager resourceManager) {
@@ -243,7 +299,7 @@ public final class VerseWorksClientEvents {
     private static void stopAllVerseWhispers() {
         Minecraft minecraft = Minecraft.getInstance();
         SoundManager soundManager = minecraft.getSoundManager();
-        for (VerseWhisperSoundInstance sound : ACTIVE_VERSE_WHISPERS) {
+        for (VerseWhisperSoundInstance sound : ACTIVE_VERSE_WHISPERS.values()) {
             sound.markFinished();
             soundManager.stop(sound);
         }

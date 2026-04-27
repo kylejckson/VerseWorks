@@ -104,5 +104,16 @@
         "stream": false
       }
     ]
+  },
+  "collapse": {
+    "sounds": [
+      {
+        "name": "verseworks:collapse",
+        "stream": false,
+        "preload": true,
+        "attenuation_distance": 256,
+        "volume": 1.35
+      }
+    ]
   }
 }

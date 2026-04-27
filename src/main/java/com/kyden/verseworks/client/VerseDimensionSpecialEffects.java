@@ -46,7 +46,7 @@ public final class VerseDimensionSpecialEffects {
     }
 
     private static boolean usesVanillaSkyGeometry(VerseDimensionParameters parameters) {
-        return VerseDimensionVisuals.usesVanillaSkyGeometry(parameters);
+        return VerseDimensionVisuals.usesVanillaSkyGeometry(parameters) && !VerseDimensionVisuals.hidesCelestialBodies(parameters);
     }
 
     @SubscribeEvent
@@ -54,6 +54,7 @@ public final class VerseDimensionSpecialEffects {
         event.register(VerseDimensionVisuals.COLORED_SKY_EFFECTS, new ColoredSkyEffects());
         event.register(VerseDimensionVisuals.ENDLIKE_EFFECTS, new EndlikeSkyEffects());
         event.register(VerseDimensionVisuals.BLACK_VOID_EFFECTS, new BlackVoidEffects());
+        event.register(VerseDimensionVisuals.SEALED_SKY_EFFECTS, new SealedSkyEffects());
     }
 
     private static final class ColoredSkyEffects extends DimensionSpecialEffects {
@@ -165,6 +166,47 @@ public final class VerseDimensionSpecialEffects {
         @Override
         public void adjustLightmapColors(ClientLevel level, float partialTicks, float skyDarken, float blockLightRedFlicker, float skyLight, int pixelX, int pixelY, Vector3f colors) {
             colors.mul(0.92F, 0.92F, 0.96F);
+        }
+    }
+
+    private static final class SealedSkyEffects extends DimensionSpecialEffects {
+        private SealedSkyEffects() {
+            super(Float.NaN, false, SkyType.NONE, false, false);
+        }
+
+        @Override
+        public Vec3 getBrightnessDependentFogColor(Vec3 fogColor, float brightness) {
+            return currentParameters()
+                .map(parameters -> {
+                    Vector3f tint = skyTint(parameters);
+                    float multiplier = brightness * 0.10F + 0.70F;
+                    return new Vec3(tint.x() * multiplier, tint.y() * multiplier, tint.z() * multiplier);
+                })
+                .orElse(fogColor.scale(0.8F));
+        }
+
+        @Override
+        public boolean isFoggyAt(int x, int y) {
+            return false;
+        }
+
+        @Override
+        public boolean renderSky(ClientLevel level, int ticks, float partialTick, org.joml.Matrix4f modelViewMatrix, Camera camera, org.joml.Matrix4f projectionMatrix, boolean isFoggy, Runnable setupFog) {
+            return true;
+        }
+
+        @Override
+        public boolean renderClouds(ClientLevel level, int ticks, float partialTick, com.mojang.blaze3d.vertex.PoseStack poseStack, double camX, double camY, double camZ, org.joml.Matrix4f modelViewMatrix, org.joml.Matrix4f projectionMatrix) {
+            return true;
+        }
+
+        @Override
+        public void adjustLightmapColors(ClientLevel level, float partialTicks, float skyDarken, float blockLightRedFlicker, float skyLight, int pixelX, int pixelY, Vector3f colors) {
+            currentParameters().ifPresent(parameters -> {
+                Vector3f tint = skyTint(parameters);
+                colors.lerp(tint, 0.08F);
+                colors.mul(0.96F, 0.96F, 0.98F);
+            });
         }
     }
 }

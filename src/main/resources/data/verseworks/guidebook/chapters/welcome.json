@@ -1,0 +1,35 @@
+{
+  "id": "welcome",
+  "title_key": "guidebook.chapter.welcome.title",
+  "summary_key": "guidebook.chapter.welcome.summary",
+  "sort_order": 0,
+  "icon": {
+    "type": "texture",
+    "value": "verseworks:textures/gui/guidebook/chapter_welcome.png"
+  },
+  "pages": [
+    {
+      "type": "text",
+      "title_key": "guidebook.entry.welcome_overview.title",
+      "body_keys": [
+        "guidebook.entry.welcome_overview.body.1",
+        "guidebook.entry.welcome_overview.body.2"
+      ]
+    },
+    {
+      "type": "link_list",
+      "title_key": "guidebook.entry.welcome_home.title",
+      "body_keys": [
+        "guidebook.entry.welcome_home.body.1"
+      ],
+      "link_chapter_ids": [
+        "getting_started",
+        "rituals",
+        "hyperbooks",
+        "dimensions",
+        "tools_and_debug",
+        "troubleshooting"
+      ]
+    }
+  ]
+}

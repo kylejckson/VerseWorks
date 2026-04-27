@@ -18,6 +18,10 @@ public final class VerseItems {
     private static final DeferredRegister<CreativeModeTab> TABS = DeferredRegister.create(Registries.CREATIVE_MODE_TAB, VerseWorks.MODID);
 
     public static final DeferredHolder<Item, VerseItem> VERSE = ITEMS.register("verse", () -> new VerseItem(new Item.Properties().stacksTo(1).rarity(Rarity.UNCOMMON)));
+    public static final DeferredHolder<Item, Item> BLANK_VERSE = ITEMS.register(
+        "blank_verse",
+        () -> new Item(new Item.Properties().stacksTo(64).rarity(Rarity.UNCOMMON))
+    );
     public static final DeferredHolder<Item, Item> HYPER_DUST = ITEMS.register(
         "hyper_dust",
         () -> new Item(new Item.Properties().stacksTo(64).rarity(Rarity.UNCOMMON))
@@ -25,6 +29,10 @@ public final class VerseItems {
     public static final DeferredHolder<Item, DimensionalAnalyzerItem> DIMENSIONAL_ANALYZER = ITEMS.register(
         "dimensional_analyzer",
         () -> new DimensionalAnalyzerItem(new Item.Properties().durability(50).rarity(Rarity.UNCOMMON))
+    );
+    public static final DeferredHolder<Item, GuidebookItem> GUIDEBOOK = ITEMS.register(
+        "guidebook",
+        () -> new GuidebookItem(new Item.Properties().stacksTo(1).rarity(Rarity.UNCOMMON))
     );
     public static final DeferredHolder<Item, HyperBookItem> HYPER_BOOK = ITEMS.register(
         "hyper_book",
@@ -65,13 +73,13 @@ public final class VerseItems {
             .icon(() -> new ItemStack(MYSTIC_CRYSTAL.get()))
             .displayItems((parameters, output) -> {
                 output.accept(MYSTIC_CRYSTAL.get());
+                output.accept(BLANK_VERSE.get());
                 output.accept(HYPER_DUST.get());
                 output.accept(DIMENSIONAL_ANALYZER.get());
+                output.accept(GUIDEBOOK.get());
                 output.accept(STABILIZED_WARP.get());
                 output.accept(MYSTIC_CRATE.get());
                 output.accept(UNLINKED_HYPER_BOOK.get());
-                output.accept(WARP.get());
-                output.accept(WARP_VINE.get());
                 output.accept(STABILIZED_WARP_VINE.get());
             })
             .build()
@@ -89,7 +97,10 @@ public final class VerseItems {
         () -> CreativeModeTab.builder()
             .title(Component.translatable("itemGroup.verseworks.verses"))
             .icon(VerseItems::iconStack)
-            .displayItems((parameters, output) -> VerseCatalog.populateOtherVerses(output, VERSE.get()))
+            .displayItems((parameters, output) -> {
+                output.accept(BLANK_VERSE.get());
+                VerseCatalog.populateOtherVerses(output, VERSE.get());
+            })
             .build()
     );
 

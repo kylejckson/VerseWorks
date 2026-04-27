@@ -13,7 +13,14 @@ public enum VerseDimensionWorldType {
     NORMAL("normal", NoiseGeneratorSettings.OVERWORLD, "minecraft:overworld"),
     AMPLIFIED("amplified", NoiseGeneratorSettings.AMPLIFIED, "minecraft:amplified"),
     SKY_ISLAND("sky_island", NoiseGeneratorSettings.OVERWORLD, "minecraft:overworld"),
-    ISLAND("island", NoiseGeneratorSettings.END, "minecraft:end"),
+    ISLAND("island", NoiseGeneratorSettings.OVERWORLD, "minecraft:overworld"),
+    ALL_STONE("all_stone", NoiseGeneratorSettings.OVERWORLD, "minecraft:overworld"),
+    BEDROCK_SHELL("bedrock_shell", NoiseGeneratorSettings.OVERWORLD, "minecraft:overworld"),
+    OCEAN("ocean", NoiseGeneratorSettings.OVERWORLD, "minecraft:overworld"),
+    CAVE_ONLY("cave_only", NoiseGeneratorSettings.OVERWORLD, "minecraft:overworld"),
+    WATER_WORLD("water_world", NoiseGeneratorSettings.OVERWORLD, "minecraft:overworld"),
+    CAVERN("cavern", NoiseGeneratorSettings.NETHER, "minecraft:nether"),
+    INVERSE_CAVES("inverse_caves", NoiseGeneratorSettings.OVERWORLD, "minecraft:overworld"),
     FLAT("flat", NoiseGeneratorSettings.OVERWORLD, "minecraft:overworld"),
     VOID("void", NoiseGeneratorSettings.OVERWORLD, "minecraft:overworld");
 
@@ -48,6 +55,35 @@ public enum VerseDimensionWorldType {
 
     public boolean isVoid() {
         return this == VOID;
+    }
+
+    public boolean usesCustomTerrainProfile() {
+        return switch (this) {
+            case SKY_ISLAND, ISLAND, ALL_STONE, OCEAN, CAVE_ONLY, WATER_WORLD, CAVERN, INVERSE_CAVES, VOID -> true;
+            default -> false;
+        };
+    }
+
+    public boolean usesStrongSurfaceReplacement() {
+        return switch (this) {
+            case SKY_ISLAND, ISLAND, OCEAN, WATER_WORLD, CAVERN, INVERSE_CAVES -> true;
+            default -> false;
+        };
+    }
+
+    public boolean hasBedrockShell() {
+        return this == BEDROCK_SHELL || this == WATER_WORLD || this == CAVERN;
+    }
+
+    public boolean hasCeiling() {
+        return switch (this) {
+            case ALL_STONE, BEDROCK_SHELL, CAVE_ONLY, WATER_WORLD, CAVERN -> true;
+            default -> false;
+        };
+    }
+
+    public boolean isFluidWorld() {
+        return this == WATER_WORLD;
     }
 
     public ResourceKey<NoiseGeneratorSettings> noiseSettingsKey() {
